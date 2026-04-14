@@ -72,7 +72,7 @@ export interface SpotifyTrack {
 
 export async function getTopArtists(
   userId: string,
-  timeRange: 'short_term' | 'long_term'
+  timeRange: 'short_term' | 'medium_term' | 'long_term'
 ): Promise<SpotifyArtist[]> {
   const data = await spotifyFetch<{ items: SpotifyArtist[] }>(
     userId,
@@ -153,7 +153,7 @@ export async function getRelatedArtists(userId: string, artistId: string): Promi
 export async function getArtistTopTracks(userId: string, artistId: string): Promise<SpotifyTrack[]> {
   const data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
     userId,
-    `/artists/${artistId}/top-tracks?market=from_token`
+    `/artists/${artistId}/top-tracks?market=MX`
   )
   return data.tracks
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { getRecommendations } from '@/lib/recommendations'
+import { getRecommendations, getRecommendationsDiagnostics } from '@/lib/recommendations'
 import { addToQueue, createPlaylist, replacePlaylistTracks, getCurrentUserId } from '@/lib/spotify'
 import { redis } from '@/lib/kv'
 
@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
   }
 
   if (tracks.length === 0) {
-    return NextResponse.json({ tracks: [], queuedCount: 0, method: 'none' })
+    // Run diagnostics to understand why
+    const diag = await getRecommendationsDiagnostics(session.userId).catch((e) => ({ diagError: String(e) }))
+    return NextResponse.json({ tracks: [], queuedCount: 0, method: 'none', diagnostics: diag })
   }
 
   // Try adding to queue first (requires Premium)
