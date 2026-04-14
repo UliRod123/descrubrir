@@ -73,9 +73,10 @@ export async function getRecommendations(
 
   // Pool B: search by top artist names — finds more tracks + collaborations with new artists
   // Searching artist:"X" returns tracks where X appears, including features/collabs
-  const topArtists = artists.slice(0, 8)
+  // Use all 20 artists with 50 results each = up to 1000 raw tracks for variety
+  const topArtists = artists.slice(0, 20)
   const searchResults = await Promise.allSettled(
-    topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 20))
+    topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 50))
   )
 
   const poolBMap = new Map<string, SpotifyTrack>()
