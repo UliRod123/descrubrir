@@ -49,3 +49,20 @@ export async function getAllUserIds(): Promise<string[]> {
   const keys = await redis.keys('user:*:tokens')
   return keys.map((k: string) => k.split(':')[1]).filter(Boolean)
 }
+
+// Cache recommendations for 2 hours to avoid Spotify rate limits
+import type { RecommendedTrack } from './recommendations'
+
+export async function getCachedRecommendations(userId: string): Promise<RecommendedTrack[] | null> {
+  const raw = await redis.get<string>(`user:${userId}:recs_cache`)
+  if (!raw) return null
+  return typeof raw === 'string' ? JSON.parse(raw) : (raw as RecommendedTrack[])
+}
+
+export async function setCachedRecommendations(userId: string, tracks: RecommendedTrack[]): Promise<void> {
+  await redis.set(`user:${userId}:recs_cache`, JSON.stringify(tracks), { ex: 60 * 60 * 2 })
+}
+
+export async function clearRecommendationsCache(userId: string): Promise<void> {
+  await redis.del(`user:${userId}:recs_cache`)
+}

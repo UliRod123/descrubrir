@@ -8,7 +8,7 @@ import {
   SpotifyTrack,
   SpotifyArtist,
 } from './spotify'
-import { filterOutRecommended, addRecommended } from './kv'
+import { filterOutRecommended, addRecommended, getCachedRecommendations, setCachedRecommendations } from './kv'
 
 export interface RecommendedTrack {
   id: string
@@ -39,10 +39,32 @@ function toRecommended(track: SpotifyTrack, artistIsNew: boolean): RecommendedTr
   }
 }
 
+// Process items in small sequential batches to avoid Spotify rate limits
+async function batchProcess<T, R>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = []
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize)
+    const batchResults = await Promise.all(batch.map(fn))
+    results.push(...batchResults)
+  }
+  return results
+}
+
 export async function getRecommendations(
   userId: string,
-  count: number
+  count: number,
+  skipCache = false
 ): Promise<RecommendedTrack[]> {
+  // Return cached recommendations if available (avoids rate limits on page reload)
+  if (!skipCache) {
+    const cached = await getCachedRecommendations(userId)
+    if (cached && cached.length >= count) return cached.slice(0, count)
+  }
+
   const [shortTerm, longTerm, recentIds] = await Promise.all([
     getTopArtists(userId, 'short_term'),
     getTopArtists(userId, 'long_term'),
@@ -55,60 +77,59 @@ export async function getRecommendations(
   const knownArtists = Array.from(knownArtistMap.values())
   const knownArtistIds = new Set(knownArtistMap.keys())
 
-  // Pool A: unseen tracks from known artists
-  const poolAPromises = knownArtists.slice(0, 20).map(async (artist) => {
-    try {
-      const albumIds = await getArtistAlbums(userId, artist.id)
-      const trackArrays = await Promise.all(
-        albumIds.slice(0, 5).map((id) => getAlbumTracks(userId, id))
-      )
-      return trackArrays.flat().filter((t) => t.id && !recentIds.has(t.id))
-    } catch {
-      return []
+  // Pool A: unseen tracks from known artists — process in batches of 3
+  const poolANested = await batchProcess(
+    knownArtists.slice(0, 12),
+    3,
+    async (artist) => {
+      try {
+        const albumIds = await getArtistAlbums(userId, artist.id)
+        const tracks = await batchProcess(
+          albumIds.slice(0, 3),
+          3,
+          (id) => getAlbumTracks(userId, id)
+        )
+        return tracks.flat().filter((t) => t.id && !recentIds.has(t.id))
+      } catch {
+        return []
+      }
     }
-  })
-  const poolARaw = (await Promise.all(poolAPromises)).flat()
-
-  const poolAFiltered = await filterOutRecommended(
-    userId,
-    poolARaw.map((t) => t.id)
   )
+  const poolARaw = poolANested.flat()
+
+  const poolAFiltered = await filterOutRecommended(userId, poolARaw.map((t) => t.id))
   const poolAIdSet = new Set(poolAFiltered)
   const poolA = poolARaw.filter((t) => poolAIdSet.has(t.id))
 
-  // Pool B: top tracks from related (new) artists
-  const relatedResults = await Promise.all(
-    knownArtists.slice(0, 5).map((a) => getRelatedArtists(userId, a.id).catch(() => [] as SpotifyArtist[]))
+  // Pool B: top tracks from related artists — process in batches of 3
+  const relatedNested = await batchProcess(
+    knownArtists.slice(0, 5),
+    3,
+    (a) => getRelatedArtists(userId, a.id).catch(() => [] as SpotifyArtist[])
   )
-  const allRelated = relatedResults.flat()
-  const newArtists = allRelated.filter((a) => !knownArtistIds.has(a.id))
+  const allRelated = relatedNested.flat()
   const uniqueNewArtists = Array.from(
-    new Map(newArtists.map((a) => [a.id, a])).values()
-  ).slice(0, 15)
+    new Map(
+      allRelated.filter((a) => !knownArtistIds.has(a.id)).map((a) => [a.id, a])
+    ).values()
+  ).slice(0, 12)
 
-  const poolBRaw = (
-    await Promise.all(
-      uniqueNewArtists.map((artist) =>
-        getArtistTopTracks(userId, artist.id).catch(() => [] as SpotifyTrack[])
-      )
-    )
+  const poolBNested = await batchProcess(
+    uniqueNewArtists,
+    3,
+    (artist) => getArtistTopTracks(userId, artist.id).catch(() => [] as SpotifyTrack[])
   )
-    .flat()
-    .filter((t) => t.id && !recentIds.has(t.id))
+  const poolBRaw = poolBNested.flat().filter((t) => t.id && !recentIds.has(t.id))
 
-  const poolBFiltered = await filterOutRecommended(
-    userId,
-    poolBRaw.map((t) => t.id)
-  )
+  const poolBFiltered = await filterOutRecommended(userId, poolBRaw.map((t) => t.id))
   const poolBIdSet = new Set(poolBFiltered)
   const poolB = poolBRaw.filter((t) => poolBIdSet.has(t.id))
 
-  // Mix: try 50/50 but let each pool compensate if the other runs short
+  // Mix: 50/50 with fallback if one pool runs short
   const shuffledA = shuffle(poolA)
   const shuffledB = shuffle(poolB)
   const half = Math.ceil(count / 2)
 
-  // Take up to half from each, then fill gaps from the other pool
   const fromA = shuffledA.slice(0, half)
   const fromB = shuffledB.slice(0, count - fromA.length)
   const remaining = count - fromA.length - fromB.length
@@ -116,11 +137,11 @@ export async function getRecommendations(
 
   const selectedA = [...fromA, ...extra].map((t) => toRecommended(t, false))
   const selectedB = fromB.map((t) => toRecommended(t, true))
-
   const combined = shuffle([...selectedA, ...selectedB])
 
-  // Save to history so they don't repeat
+  // Save to history and cache
   await addRecommended(userId, combined.map((t) => t.id))
+  await setCachedRecommendations(userId, combined)
 
   return combined
 }

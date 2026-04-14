@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
     20
   )
 
-  const tracks = await getRecommendations(session.userId, count)
+  // skipCache=true so each button press gives fresh songs
+  const tracks = await getRecommendations(session.userId, count, true)
 
   // Add to Spotify queue — fails silently if no active device
   for (const track of tracks) {
