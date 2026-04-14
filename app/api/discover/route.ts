@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { getRecommendations, getRecommendationsDiagnostics } from '@/lib/recommendations'
-import { addToQueue, createPlaylist, replacePlaylistTracks, addTracksToPlaylist, getCurrentUserId } from '@/lib/spotify'
+import { addToQueue, createPlaylist, replacePlaylistTracks, addTracksToPlaylist } from '@/lib/spotify'
 import { redis } from '@/lib/kv'
 
 const PLAYLIST_NAME = '🔀 Descubrir Ahora'
 const PLAYLIST_KEY = (userId: string) => `user:${userId}:discoverPlaylistId`
 
 async function ensurePlaylist(userId: string): Promise<string> {
-  const spotifyUserId = await getCurrentUserId(userId)
-  const playlistId = await createPlaylist(userId, spotifyUserId, PLAYLIST_NAME)
+  const playlistId = await createPlaylist(userId, '', PLAYLIST_NAME)
   await redis.set(PLAYLIST_KEY(userId), playlistId)
   return playlistId
 }

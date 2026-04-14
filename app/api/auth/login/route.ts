@@ -16,6 +16,7 @@ export function GET() {
     response_type: 'code',
     redirect_uri: process.env.SPOTIFY_REDIRECT_URI!,
     scope: SCOPES,
+    show_dialog: 'true',
   })
   return NextResponse.redirect(
     `https://accounts.spotify.com/authorize?${params.toString()}`

@@ -188,18 +188,18 @@ export async function getCurrentUserId(userId: string): Promise<string> {
 
 export async function createPlaylist(
   userId: string,
-  spotifyUserId: string,
+  _spotifyUserId: string,
   name: string
 ): Promise<string> {
   const data = await spotifyFetch<{ id: string }>(
     userId,
-    `/users/${spotifyUserId}/playlists`,
+    `/me/playlists`,
     {
       method: 'POST',
       body: JSON.stringify({
         name,
-        public: true,
-        description: 'Tu discovery diario — generado automáticamente',
+        public: false,
+        description: 'Tu discovery de musica nueva — generado automaticamente',
       }),
     }
   )
