@@ -66,3 +66,7 @@ export async function setCachedRecommendations(userId: string, tracks: Recommend
 export async function clearRecommendationsCache(userId: string): Promise<void> {
   await redis.del(`user:${userId}:recs_cache`)
 }
+
+export async function clearRecommendedHistory(userId: string): Promise<void> {
+  await redis.del(`user:${userId}:recommended`)
+}

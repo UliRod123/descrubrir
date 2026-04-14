@@ -43,21 +43,23 @@ export default function DiscoverButton() {
       const thisBatch = Math.min(batchSize, remaining)
       try {
         const res = await fetch(`/api/discover?count=${thisBatch}`)
+        const data = await res.json().catch(() => ({}))
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
           setMessage(
-            err.error === 'Unauthorized'
+            data.error === 'Unauthorized'
               ? 'Sesión expirada, recarga la página.'
-              : 'Abre Spotify en algún dispositivo primero, luego intenta de nuevo.'
+              : `Error: ${data.error ?? 'desconocido'}`
           )
           setLoading(false)
           return
         }
-        const data = await res.json()
         if (data.tracks?.length) {
           allTracks.push(...data.tracks)
           setLastTracks([...allTracks])
-          setMessage(`⏳ ${allTracks.length} de ${count} canciones cargando...`)
+          // Show queue status
+          const queued = data.queuedCount ?? data.tracks.length
+          const queueMsg = queued > 0 ? ` (${queued} en cola)` : ' (sin dispositivo activo)'
+          setMessage(`⏳ ${allTracks.length} de ${count} canciones${queueMsg}`)
         }
       } catch {
         setMessage('Error de conexión.')
@@ -67,9 +69,9 @@ export default function DiscoverButton() {
     }
 
     if (allTracks.length === 0) {
-      setMessage('Abre Spotify en algún dispositivo y vuelve a intentar.')
+      setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
     } else {
-      setMessage(`✓ ${allTracks.length} canciones agregadas a tu cola (≈ ${displayTime})`)
+      setMessage(`✓ ${allTracks.length} canciones listas (≈ ${displayTime}) — revisa tu cola en Spotify`)
     }
     setLoading(false)
   }

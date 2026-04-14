@@ -11,6 +11,7 @@ import {
   addRecommended,
   getCachedRecommendations,
   setCachedRecommendations,
+  clearRecommendedHistory,
 } from './kv'
 
 export interface RecommendedTrack {
@@ -108,9 +109,19 @@ export async function getRecommendations(
     ),
   ])
 
+  // If both pools are empty, the history is exhausted — reset and use unfiltered tracks
+  let finalPoolA = poolANew
+  let finalPoolB = poolBNew
+
+  if (finalPoolA.length === 0 && finalPoolB.length === 0) {
+    await clearRecommendedHistory(userId)
+    finalPoolA = shuffle(poolAClean)
+    finalPoolB = shuffle(poolBClean)
+  }
+
   // Mix 50/50 with gap filling
-  const shuffledA = shuffle(poolANew)
-  const shuffledB = shuffle(poolBNew)
+  const shuffledA = shuffle(finalPoolA)
+  const shuffledB = shuffle(finalPoolB)
   const half = Math.ceil(count / 2)
 
   const fromA = shuffledA.slice(0, half).map((t) => toRecommended(t, false))
