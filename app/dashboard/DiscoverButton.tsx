@@ -33,10 +33,11 @@ export default function DiscoverButton() {
     setLoading(true)
     setMessage('')
     setLastTracks([])
+    setPlaylistId(null)
 
     const allTracks: Track[] = []
-    // Fetch in batches of 100 (Spotify's max per recommendations call)
-    const batchSize = 100
+    // Fetch in batches of 50 — each batch = one playlist update (fast single API call)
+    const batchSize = 50
     const batches = Math.ceil(count / batchSize)
 
     for (let i = 0; i < batches; i++) {
@@ -58,12 +59,7 @@ export default function DiscoverButton() {
           allTracks.push(...data.tracks)
           setLastTracks([...allTracks])
           if (data.playlistId) setPlaylistId(data.playlistId)
-          const queueMsg = data.method === 'queue'
-            ? ` — en tu cola`
-            : data.method === 'playlist'
-            ? ` — en playlist`
-            : ''
-          setMessage(`⏳ ${allTracks.length} de ${count} canciones${queueMsg}`)
+          setMessage(`⏳ Cargando... ${allTracks.length} de ${count} canciones`)
         }
       } catch {
         setMessage('Error de conexión.')
@@ -75,9 +71,9 @@ export default function DiscoverButton() {
     if (allTracks.length === 0) {
       setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
     } else if (playlistId) {
-      setMessage(`✓ ${allTracks.length} canciones en tu playlist "🔀 Descubrir Ahora" en Spotify`)
+      setMessage(`✓ ${allTracks.length} canciones listas en "🔀 Descubrir Ahora"`)
     } else {
-      setMessage(`✓ ${allTracks.length} canciones en tu cola de Spotify (≈ ${displayTime})`)
+      setMessage(`✓ ${allTracks.length} canciones en tu cola (≈ ${displayTime})`)
     }
     setLoading(false)
   }
@@ -159,7 +155,7 @@ export default function DiscoverButton() {
 
       {lastTracks.length > 0 && (
         <div className="w-full">
-          <p className="text-zinc-500 text-xs mb-2">En tu cola ({lastTracks.length} canciones):</p>
+          <p className="text-zinc-500 text-xs mb-2">{playlistId ? 'En tu playlist' : 'En tu cola'} ({lastTracks.length} canciones):</p>
           <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
             {lastTracks.map((track) => (
               <li key={track.id} className="flex items-center gap-3 bg-zinc-800 rounded-lg p-3">

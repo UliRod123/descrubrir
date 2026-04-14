@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { getRecommendations, getRecommendationsDiagnostics } from '@/lib/recommendations'
-import { addToQueue, createPlaylist, replacePlaylistTracks, getCurrentUserId } from '@/lib/spotify'
+import { addToQueue, createPlaylist, replacePlaylistTracks, addTracksToPlaylist, getCurrentUserId } from '@/lib/spotify'
 import { redis } from '@/lib/kv'
+
+const PLAYLIST_NAME = '🔀 Descubrir Ahora'
+const PLAYLIST_KEY = (userId: string) => `user:${userId}:discoverPlaylistId`
 
 export async function GET(req: NextRequest) {
   const session = await getSession()
@@ -21,39 +24,53 @@ export async function GET(req: NextRequest) {
   }
 
   if (tracks.length === 0) {
-    // Run diagnostics to understand why
-    const diag = await getRecommendationsDiagnostics(session.userId).catch((e) => ({ diagError: String(e) }))
+    const diag = await getRecommendationsDiagnostics(session.userId).catch(e => ({ diagError: String(e) }))
     return NextResponse.json({ tracks: [], queuedCount: 0, method: 'none', diagnostics: diag })
   }
 
-  // Try adding to queue first (requires Premium)
-  let queuedCount = 0
-  let queueFailed = false
-  for (const track of tracks) {
-    try {
-      await addToQueue(session.userId, track.uri)
-      queuedCount++
-    } catch {
-      queueFailed = true
-      break
-    }
-  }
+  const uris = tracks.map(t => t.uri)
 
-  // If queue fails (Free account), fall back to updating the Discovery playlist
-  if (queueFailed || queuedCount === 0) {
-    try {
-      let playlistId = await redis.get<string>(`user:${session.userId}:discoverPlaylistId`)
-      if (!playlistId) {
-        const spotifyUserId = await getCurrentUserId(session.userId)
-        playlistId = await createPlaylist(session.userId, spotifyUserId, '🔀 Descubrir Ahora')
-        await redis.set(`user:${session.userId}:discoverPlaylistId`, playlistId)
+  // Strategy 1: if count is small (≤10), try adding to queue (instant play)
+  if (count <= 10) {
+    let queuedCount = 0
+    let queueFailed = false
+    for (const uri of uris) {
+      try {
+        await addToQueue(session.userId, uri)
+        queuedCount++
+      } catch {
+        queueFailed = true
+        break
       }
-      await replacePlaylistTracks(session.userId, playlistId, tracks.map((t) => t.uri))
-      return NextResponse.json({ tracks, queuedCount: 0, method: 'playlist', playlistId })
-    } catch (err) {
-      return NextResponse.json({ tracks, queuedCount: 0, method: 'tracks_only', error: String(err) })
+    }
+    if (!queueFailed && queuedCount > 0) {
+      return NextResponse.json({ tracks, queuedCount, method: 'queue' })
     }
   }
 
-  return NextResponse.json({ tracks, queuedCount, method: 'queue' })
+  // Strategy 2 (default for large counts): update playlist — single API call, no timeout risk
+  try {
+    let playlistId = await redis.get<string>(PLAYLIST_KEY(session.userId))
+
+    if (!playlistId) {
+      const spotifyUserId = await getCurrentUserId(session.userId)
+      playlistId = await createPlaylist(session.userId, spotifyUserId, PLAYLIST_NAME)
+      await redis.set(PLAYLIST_KEY(session.userId), playlistId)
+    }
+
+    // Spotify allows max 100 URIs per PUT — for larger batches use POST to add
+    if (uris.length <= 100) {
+      await replacePlaylistTracks(session.userId, playlistId, uris)
+    } else {
+      await replacePlaylistTracks(session.userId, playlistId, uris.slice(0, 100))
+      // Add remaining in chunks of 100
+      for (let i = 100; i < uris.length; i += 100) {
+        await addTracksToPlaylist(session.userId, playlistId, uris.slice(i, i + 100))
+      }
+    }
+
+    return NextResponse.json({ tracks, queuedCount: 0, method: 'playlist', playlistId })
+  } catch (err) {
+    return NextResponse.json({ tracks, queuedCount: 0, method: 'tracks_only', error: String(err) })
+  }
 }

@@ -216,3 +216,14 @@ export async function replacePlaylistTracks(
     body: JSON.stringify({ uris }),
   })
 }
+
+export async function addTracksToPlaylist(
+  userId: string,
+  playlistId: string,
+  uris: string[]
+): Promise<void> {
+  await spotifyFetch(userId, `/playlists/${playlistId}/tracks`, {
+    method: 'POST',
+    body: JSON.stringify({ uris }),
+  })
+}
