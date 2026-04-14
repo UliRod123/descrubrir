@@ -153,7 +153,7 @@ export async function getRelatedArtists(userId: string, artistId: string): Promi
 export async function getArtistTopTracks(userId: string, artistId: string): Promise<SpotifyTrack[]> {
   const data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
     userId,
-    `/artists/${artistId}/top-tracks?market=US`
+    `/artists/${artistId}/top-tracks?market=from_token`
   )
   return data.tracks
 }

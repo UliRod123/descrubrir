@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { getRecommendations } from '@/lib/recommendations'
-import { addToQueue } from '@/lib/spotify'
+import { addToQueue, createPlaylist, replacePlaylistTracks, getCurrentUserId } from '@/lib/spotify'
+import { redis } from '@/lib/kv'
 
 export async function GET(req: NextRequest) {
   const session = await getSession()
@@ -14,22 +15,43 @@ export async function GET(req: NextRequest) {
 
   let tracks
   try {
-    // skipCache=true so each button press gives fresh songs
     tracks = await getRecommendations(session.userId, count, true)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 
-  // Add to Spotify queue — fails silently if no active device
+  if (tracks.length === 0) {
+    return NextResponse.json({ tracks: [], queuedCount: 0, method: 'none' })
+  }
+
+  // Try adding to queue first (requires Premium)
   let queuedCount = 0
+  let queueFailed = false
   for (const track of tracks) {
     try {
       await addToQueue(session.userId, track.uri)
       queuedCount++
     } catch {
-      // No active device — tracks still returned so user can see what was picked
+      queueFailed = true
+      break
     }
   }
 
-  return NextResponse.json({ tracks, queuedCount })
+  // If queue fails (Free account), fall back to updating the Discovery playlist
+  if (queueFailed || queuedCount === 0) {
+    try {
+      let playlistId = await redis.get<string>(`user:${session.userId}:discoverPlaylistId`)
+      if (!playlistId) {
+        const spotifyUserId = await getCurrentUserId(session.userId)
+        playlistId = await createPlaylist(session.userId, spotifyUserId, '🔀 Descubrir Ahora')
+        await redis.set(`user:${session.userId}:discoverPlaylistId`, playlistId)
+      }
+      await replacePlaylistTracks(session.userId, playlistId, tracks.map((t) => t.uri))
+      return NextResponse.json({ tracks, queuedCount: 0, method: 'playlist', playlistId })
+    } catch (err) {
+      return NextResponse.json({ tracks, queuedCount: 0, method: 'tracks_only', error: String(err) })
+    }
+  }
+
+  return NextResponse.json({ tracks, queuedCount, method: 'queue' })
 }

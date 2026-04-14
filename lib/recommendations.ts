@@ -70,38 +70,40 @@ export async function getRecommendations(
 
   const knownArtistIds = new Set(topArtists.map((a) => a.id))
 
-  // Pool A: top tracks from user's known artists (sequential, 3 at a time)
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  // Pool A: top tracks from user's known artists (sequential batches with delay)
   const poolAResults: SpotifyTrack[] = []
-  const artistsForA = topArtists.slice(0, 8)
-  for (let i = 0; i < artistsForA.length; i += 3) {
-    const batch = artistsForA.slice(i, i + 3)
+  const artistsForA = topArtists.slice(0, 6)
+  for (let i = 0; i < artistsForA.length; i += 2) {
+    const batch = artistsForA.slice(i, i + 2)
     const results = await Promise.all(
       batch.map((a) => getArtistTopTracks(userId, a.id).catch(() => [] as SpotifyTrack[]))
     )
     poolAResults.push(...results.flat())
+    if (i + 2 < artistsForA.length) await delay(300)
   }
 
-  // Pool B: top tracks from related artists (new discovery)
+  // Pool B: related artists top tracks
   const relatedArtistMap = new Map<string, SpotifyArtist>()
-  const seedArtists = topArtists.slice(0, 4)
-  for (let i = 0; i < seedArtists.length; i += 2) {
-    const batch = seedArtists.slice(i, i + 2)
-    const results = await Promise.all(
-      batch.map((a) => getRelatedArtists(userId, a.id).catch(() => [] as SpotifyArtist[]))
-    )
-    for (const related of results.flat()) {
-      if (!knownArtistIds.has(related.id)) relatedArtistMap.set(related.id, related)
+  const seedArtists = topArtists.slice(0, 3)
+  for (const artist of seedArtists) {
+    const related = await getRelatedArtists(userId, artist.id).catch(() => [] as SpotifyArtist[])
+    for (const r of related) {
+      if (!knownArtistIds.has(r.id)) relatedArtistMap.set(r.id, r)
     }
+    await delay(200)
   }
 
-  const newArtists = shuffle(Array.from(relatedArtistMap.values())).slice(0, 8)
+  const newArtists = shuffle(Array.from(relatedArtistMap.values())).slice(0, 6)
   const poolBResults: SpotifyTrack[] = []
-  for (let i = 0; i < newArtists.length; i += 3) {
-    const batch = newArtists.slice(i, i + 3)
+  for (let i = 0; i < newArtists.length; i += 2) {
+    const batch = newArtists.slice(i, i + 2)
     const results = await Promise.all(
       batch.map((a) => getArtistTopTracks(userId, a.id).catch(() => [] as SpotifyTrack[]))
     )
     poolBResults.push(...results.flat())
+    if (i + 2 < newArtists.length) await delay(300)
   }
 
   // Filter: remove recently played tracks

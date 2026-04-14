@@ -5,7 +5,9 @@ const SCOPES = [
   'user-read-recently-played',
   'user-library-read',
   'playlist-modify-public',
+  'playlist-modify-private',
   'user-modify-playback-state',
+  'user-read-playback-state',
 ].join(' ')
 
 export function GET() {

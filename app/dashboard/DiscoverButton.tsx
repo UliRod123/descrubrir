@@ -22,6 +22,7 @@ export default function DiscoverButton() {
   const [lastTracks, setLastTracks] = useState<Track[]>([])
   const [message, setMessage] = useState('')
   const [hours, setHours] = useState(1)
+  const [playlistId, setPlaylistId] = useState<string | null>(null)
 
   const count = songsForHours(hours)
   const displayTime = hours < 1
@@ -56,9 +57,12 @@ export default function DiscoverButton() {
         if (data.tracks?.length) {
           allTracks.push(...data.tracks)
           setLastTracks([...allTracks])
-          // Show queue status
-          const queued = data.queuedCount ?? data.tracks.length
-          const queueMsg = queued > 0 ? ` (${queued} en cola)` : ' (sin dispositivo activo)'
+          if (data.playlistId) setPlaylistId(data.playlistId)
+          const queueMsg = data.method === 'queue'
+            ? ` — en tu cola`
+            : data.method === 'playlist'
+            ? ` — en playlist`
+            : ''
           setMessage(`⏳ ${allTracks.length} de ${count} canciones${queueMsg}`)
         }
       } catch {
@@ -70,8 +74,10 @@ export default function DiscoverButton() {
 
     if (allTracks.length === 0) {
       setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
+    } else if (playlistId) {
+      setMessage(`✓ ${allTracks.length} canciones en tu playlist "🔀 Descubrir Ahora" en Spotify`)
     } else {
-      setMessage(`✓ ${allTracks.length} canciones listas (≈ ${displayTime}) — revisa tu cola en Spotify`)
+      setMessage(`✓ ${allTracks.length} canciones en tu cola de Spotify (≈ ${displayTime})`)
     }
     setLoading(false)
   }
@@ -131,12 +137,24 @@ export default function DiscoverButton() {
       </button>
 
       {message && (
-        <p className={`font-medium text-sm text-center ${
-          message.startsWith('✓') ? 'text-green-400' :
-          message.startsWith('⏳') ? 'text-zinc-400' : 'text-yellow-400'
-        }`}>
-          {message}
-        </p>
+        <div className="text-center">
+          <p className={`font-medium text-sm ${
+            message.startsWith('✓') ? 'text-green-400' :
+            message.startsWith('⏳') ? 'text-zinc-400' : 'text-yellow-400'
+          }`}>
+            {message}
+          </p>
+          {playlistId && message.startsWith('✓') && (
+            <a
+              href={`https://open.spotify.com/playlist/${playlistId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green-500 underline text-xs mt-1 inline-block"
+            >
+              Abrir playlist en Spotify →
+            </a>
+          )}
+        </div>
       )}
 
       {lastTracks.length > 0 && (
