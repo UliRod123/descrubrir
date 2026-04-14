@@ -81,6 +81,43 @@ export async function getTopArtists(
   return data.items
 }
 
+export interface SpotifyArtistFull extends SpotifyArtist {
+  genres: string[]
+}
+
+export async function getTopArtistsFull(userId: string): Promise<SpotifyArtistFull[]> {
+  const data = await spotifyFetch<{ items: SpotifyArtistFull[] }>(
+    userId,
+    '/me/top/artists?time_range=medium_term&limit=10'
+  )
+  return data.items
+}
+
+export async function getTopTracks(userId: string): Promise<SpotifyTrack[]> {
+  const data = await spotifyFetch<{ items: SpotifyTrack[] }>(
+    userId,
+    '/me/top/tracks?time_range=medium_term&limit=5'
+  )
+  return data.items
+}
+
+// Spotify's own recommendations engine — most efficient (1 API call, great variety)
+export async function getSpotifyRecommendations(
+  userId: string,
+  seedArtistIds: string[],
+  seedGenres: string[],
+  limit: number
+): Promise<SpotifyTrack[]> {
+  const params = new URLSearchParams({ limit: String(Math.min(limit, 100)) })
+  if (seedArtistIds.length) params.set('seed_artists', seedArtistIds.slice(0, 3).join(','))
+  if (seedGenres.length) params.set('seed_genres', seedGenres.slice(0, 2).join(','))
+  const data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
+    userId,
+    `/recommendations?${params.toString()}`
+  )
+  return data.tracks
+}
+
 export async function getRecentlyPlayedTrackIds(userId: string): Promise<Set<string>> {
   const data = await spotifyFetch<{ items: { track: { id: string } }[] }>(
     userId,

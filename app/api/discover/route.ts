@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
 
   const count = Math.min(
     parseInt(req.nextUrl.searchParams.get('count') ?? '10', 10),
-    20
+    100
   )
 
   // skipCache=true so each button press gives fresh songs
