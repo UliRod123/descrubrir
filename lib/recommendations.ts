@@ -62,14 +62,14 @@ export async function getRecommendations(
 
   const knownArtistIds = new Set(topArtists.map((a) => a.id))
 
-  // Extract user's genres from their top artists
+  // Extract user's genres from their top artists (guard against undefined)
   const userGenres = Array.from(
-    new Set(topArtists.flatMap((a) => a.genres))
+    new Set(topArtists.flatMap((a) => a.genres ?? []))
   ).slice(0, 3)
 
   // Pick 2 random variety genres different from user's usual genres
   const extraGenres = shuffle(
-    VARIETY_GENRES.filter((g) => !userGenres.some((ug) => ug.includes(g)))
+    VARIETY_GENRES.filter((g) => !userGenres.some((ug) => (ug ?? '').includes(g)))
   ).slice(0, 2)
 
   const seedArtistIds = topArtists.slice(0, 3).map((a) => a.id)
@@ -79,9 +79,18 @@ export async function getRecommendations(
   // Pool B: recommendations based on genre variety (more adventurous)
   const batchSize = Math.min(Math.ceil(count * 1.5), 100) // fetch extra to have room after filtering
 
+  // Need at least 1 seed total — fallback to artist seeds if genres are empty
+  const poolAGenres = userGenres.length ? userGenres : []
+  const poolBGenres = [...(userGenres.slice(0, 1)), ...extraGenres]
+  const poolBArtists = seedArtistIds.length && poolBGenres.length < 1 ? seedArtistIds.slice(0, 1) : []
+
   const [poolARaw, poolBRaw] = await Promise.all([
-    getSpotifyRecommendations(userId, seedArtistIds, userGenres, batchSize).catch(() => [] as SpotifyTrack[]),
-    getSpotifyRecommendations(userId, seedTrackIds.length ? [] : seedArtistIds.slice(0, 1), [...userGenres.slice(0, 1), ...extraGenres], batchSize).catch(() => [] as SpotifyTrack[]),
+    seedArtistIds.length || poolAGenres.length
+      ? getSpotifyRecommendations(userId, seedArtistIds, poolAGenres, batchSize).catch(() => [] as SpotifyTrack[])
+      : Promise.resolve([] as SpotifyTrack[]),
+    poolBArtists.length || poolBGenres.length
+      ? getSpotifyRecommendations(userId, poolBArtists, poolBGenres, batchSize).catch(() => [] as SpotifyTrack[])
+      : Promise.resolve([] as SpotifyTrack[]),
   ])
 
   // Filter out recently played

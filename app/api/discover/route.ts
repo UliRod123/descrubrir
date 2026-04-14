@@ -12,17 +12,24 @@ export async function GET(req: NextRequest) {
     100
   )
 
-  // skipCache=true so each button press gives fresh songs
-  const tracks = await getRecommendations(session.userId, count, true)
+  let tracks
+  try {
+    // skipCache=true so each button press gives fresh songs
+    tracks = await getRecommendations(session.userId, count, true)
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 
   // Add to Spotify queue — fails silently if no active device
+  let queuedCount = 0
   for (const track of tracks) {
     try {
       await addToQueue(session.userId, track.uri)
+      queuedCount++
     } catch {
       // No active device — tracks still returned so user can see what was picked
     }
   }
 
-  return NextResponse.json({ tracks })
+  return NextResponse.json({ tracks, queuedCount })
 }
