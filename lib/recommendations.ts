@@ -1,5 +1,6 @@
 import {
   getTopArtistsFull,
+  getTopArtists,
   getRecentlyPlayedTrackIds,
   getRelatedArtists,
   getArtistTopTracks,
@@ -54,10 +55,18 @@ export async function getRecommendations(
     if (cached && cached.length >= Math.min(count, 10)) return cached.slice(0, count)
   }
 
-  const [topArtists, recentIds] = await Promise.all([
-    getTopArtistsFull(userId),
-    getRecentlyPlayedTrackIds(userId),
+  // Combine all time ranges to maximize artist coverage
+  const [fullArtists, shortArtists, longArtists, recentIds] = await Promise.all([
+    getTopArtistsFull(userId).catch(() => []),
+    getTopArtists(userId, 'short_term').catch(() => []),
+    getTopArtists(userId, 'long_term').catch(() => []),
+    getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
   ])
+
+  // Merge all artists, deduplicate
+  const artistMap = new Map<string, SpotifyArtist>()
+  for (const a of [...fullArtists, ...shortArtists, ...longArtists]) artistMap.set(a.id, a)
+  const topArtists = Array.from(artistMap.values())
 
   const knownArtistIds = new Set(topArtists.map((a) => a.id))
 
