@@ -1,10 +1,10 @@
 import {
-  getTopArtists,
+  getTopTracks,
+  getTopArtistsFull,
+  searchTracks,
   getRecentlyPlayedTrackIds,
-  getRelatedArtists,
-  getArtistTopTracks,
   SpotifyTrack,
-  SpotifyArtist,
+  SpotifyArtistFull,
 } from './spotify'
 import {
   filterOutRecommended,
@@ -53,111 +53,90 @@ export async function getRecommendations(
     if (cached && cached.length >= Math.min(count, 10)) return cached.slice(0, count)
   }
 
-  // Fetch base data in parallel — all 3 time ranges for best coverage
-  const [shortArtists, mediumArtists, longArtists, recentIds] = await Promise.all([
-    getTopArtists(userId, 'short_term').catch((e) => { console.error('[recs] short_term error:', e); return [] as SpotifyArtist[] }),
-    getTopArtists(userId, 'medium_term').catch((e) => { console.error('[recs] medium_term error:', e); return [] as SpotifyArtist[] }),
-    getTopArtists(userId, 'long_term').catch((e) => { console.error('[recs] long_term error:', e); return [] as SpotifyArtist[] }),
-    getRecentlyPlayedTrackIds(userId).catch((e) => { console.error('[recs] recentIds error:', e); return new Set<string>() }),
+  // Fetch user data in parallel — all /me/ endpoints, always work
+  const [tracksShort, tracksMedium, tracksLong, artistsFull, recentIds] = await Promise.all([
+    getTopTracks(userId, 'short_term', 50).catch(() => [] as SpotifyTrack[]),
+    getTopTracks(userId, 'medium_term', 50).catch(() => [] as SpotifyTrack[]),
+    getTopTracks(userId, 'long_term', 50).catch(() => [] as SpotifyTrack[]),
+    getTopArtistsFull(userId, 'medium_term', 20).catch(() => [] as SpotifyArtistFull[]),
+    getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
   ])
 
-  console.log(`[recs] artists: short=${shortArtists.length} medium=${mediumArtists.length} long=${longArtists.length} recentIds=${recentIds.size}`)
-
-  // Deduplicate known artists across all time ranges
-  const artistMap = new Map<string, SpotifyArtist>()
-  for (const a of [...shortArtists, ...mediumArtists, ...longArtists]) artistMap.set(a.id, a)
-  const knownArtists = Array.from(artistMap.values())
-  const knownArtistIds = new Set(artistMap.keys())
-
-  console.log(`[recs] knownArtists total: ${knownArtists.length} — ${knownArtists.slice(0, 5).map(a => a.name).join(', ')}`)
-
-  if (knownArtists.length === 0) {
-    console.error('[recs] ABORT: no known artists')
-    return []
+  // Pool A: user's own top tracks across all time ranges, minus recently played
+  const trackMap = new Map<string, SpotifyTrack>()
+  for (const t of [...tracksShort, ...tracksMedium, ...tracksLong]) {
+    if (t.id && t.uri) trackMap.set(t.id, t)
   }
+  const knownArtistIds = new Set(artistsFull.map(a => a.id))
+  const poolARaw = Array.from(trackMap.values()).filter(t => !recentIds.has(t.id))
 
-  // Pool A: top tracks from known artists (top 8 for more variety)
-  const poolAResults = await Promise.allSettled(
-    knownArtists.slice(0, 8).map((a) => getArtistTopTracks(userId, a.id))
+  // Pool B: search tracks by user's top genres — discovers new artists/tracks
+  const genres = Array.from(
+    new Set(artistsFull.flatMap(a => a.genres ?? []))
+  ).slice(0, 6)
+
+  // Also search by top artist names for variety
+  const topArtistNames = artistsFull.slice(0, 4).map(a => a.name)
+
+  const searchQueries = [
+    ...genres.slice(0, 3).map(g => `genre:"${g}"`),
+    ...topArtistNames.slice(0, 2).map(name => `artist:"${name}"`),
+  ]
+
+  const searchResults = await Promise.allSettled(
+    searchQueries.map(q => searchTracks(userId, q, 20))
   )
-  poolAResults.forEach((r, i) => {
-    if (r.status === 'rejected') console.error(`[recs] poolA artist[${i}] ${knownArtists[i]?.name} error:`, r.reason)
-    else console.log(`[recs] poolA artist[${i}] ${knownArtists[i]?.name}: ${r.value.length} tracks`)
-  })
 
-  const poolARaw = poolAResults
-    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
-    .filter((t) => t.id && t.uri && !recentIds.has(t.id))
-
-  console.log(`[recs] poolARaw after recentIds filter: ${poolARaw.length}`)
-
-  // Pool B: get related artists then their top tracks
-  const relatedResults = await Promise.allSettled(
-    knownArtists.slice(0, 5).map((a) => getRelatedArtists(userId, a.id))
+  const poolBRaw = Array.from(
+    new Map(
+      searchResults
+        .flatMap(r => r.status === 'fulfilled' ? r.value : [])
+        .filter(t => t.id && t.uri && !recentIds.has(t.id))
+        .map(t => [t.id, t])
+    ).values()
   )
-  const newArtists = shuffle(
-    Array.from(
-      new Map(
-        relatedResults
-          .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
-          .filter((a) => !knownArtistIds.has(a.id))
-          .map((a) => [a.id, a])
-      ).values()
-    )
-  ).slice(0, 8)
-
-  console.log(`[recs] newArtists for poolB: ${newArtists.length} — ${newArtists.slice(0, 3).map(a => a.name).join(', ')}`)
-
-  const poolBResults = await Promise.allSettled(
-    newArtists.map((a) => getArtistTopTracks(userId, a.id))
-  )
-  const poolBRaw = poolBResults
-    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
-    .filter((t) => t.id && t.uri && !recentIds.has(t.id))
-
-  console.log(`[recs] poolBRaw after recentIds filter: ${poolBRaw.length}`)
+  // Pool B "new artist" = track whose primary artist is NOT in user's known artists
+  const poolBNew = poolBRaw.filter(t => !knownArtistIds.has(t.artists[0]?.id ?? ''))
+  const poolBKnown = poolBRaw.filter(t => knownArtistIds.has(t.artists[0]?.id ?? ''))
+  // Prefer new artists for Pool B, fall back to known if needed
+  const poolBCombined = [...poolBNew, ...poolBKnown]
 
   // Filter already recommended
   const [poolAFiltered, poolBFiltered] = await Promise.all([
-    filterOutRecommended(userId, poolARaw.map((t) => t.id)),
-    filterOutRecommended(userId, poolBRaw.map((t) => t.id)),
+    filterOutRecommended(userId, poolARaw.map(t => t.id)),
+    filterOutRecommended(userId, poolBCombined.map(t => t.id)),
   ])
 
   const poolASet = new Set(poolAFiltered)
   const poolBSet = new Set(poolBFiltered)
-  let poolA = poolARaw.filter((t) => poolASet.has(t.id))
-  let poolB = poolBRaw.filter((t) => poolBSet.has(t.id))
-
-  console.log(`[recs] after filterOutRecommended: poolA=${poolA.length} poolB=${poolB.length} (raw: A=${poolARaw.length} B=${poolBRaw.length})`)
+  let poolA = poolARaw.filter(t => poolASet.has(t.id))
+  let poolB = poolBCombined.filter(t => poolBSet.has(t.id))
 
   // Auto-reset history if both pools exhausted
   if (poolA.length === 0 && poolB.length === 0) {
-    console.log('[recs] both pools exhausted — clearing history and retrying')
     await clearRecommendedHistory(userId)
     poolA = shuffle(poolARaw)
-    poolB = shuffle(poolBRaw)
-    console.log(`[recs] after reset: poolA=${poolA.length} poolB=${poolB.length}`)
+    poolB = shuffle(poolBCombined)
   }
 
-  if (poolA.length === 0 && poolB.length === 0) {
-    console.error('[recs] ABORT: pools empty even after reset — poolARaw and poolBRaw are both empty')
-    return []
-  }
+  if (poolA.length === 0 && poolB.length === 0) return []
 
-  // Mix 50/50 with gap filling
+  // Mix: 50% Pool A (familiar) + 50% Pool B (discovery)
   const half = Math.ceil(count / 2)
-  const fromA = shuffle(poolA).slice(0, half).map((t) => toRecommended(t, false))
-  const fromB = shuffle(poolB).slice(0, count - fromA.length).map((t) => toRecommended(t, true))
+  const fromA = shuffle(poolA).slice(0, half).map(t => toRecommended(t, false))
+  const fromB = shuffle(poolB).slice(0, count - fromA.length).map(t => {
+    const isNew = !knownArtistIds.has(t.artists[0]?.id ?? '')
+    return toRecommended(t, isNew)
+  })
   const gap = count - fromA.length - fromB.length
   const extra = gap > 0
-    ? shuffle(poolA).slice(half, half + gap).map((t) => toRecommended(t, false))
+    ? shuffle(poolA).slice(half, half + gap).map(t => toRecommended(t, false))
     : []
 
   const combined = shuffle([...fromA, ...fromB, ...extra])
-  console.log(`[recs] final: ${combined.length} tracks (fromA=${fromA.length} fromB=${fromB.length} extra=${extra.length})`)
 
   if (combined.length > 0) {
-    await addRecommended(userId, combined.map((t) => t.id))
+    await addRecommended(userId, combined.map(t => t.id))
     await setCachedRecommendations(userId, combined)
   }
 
@@ -165,33 +144,31 @@ export async function getRecommendations(
 }
 
 export async function getRecommendationsDiagnostics(userId: string): Promise<Record<string, unknown>> {
-  const [shortArtists, mediumArtists, longArtists, recentIds] = await Promise.all([
-    getTopArtists(userId, 'short_term').catch((e) => ({ error: String(e) })),
-    getTopArtists(userId, 'medium_term').catch((e) => ({ error: String(e) })),
-    getTopArtists(userId, 'long_term').catch((e) => ({ error: String(e) })),
+  const [tracksShort, tracksMedium, tracksLong, artistsFull, recentIds] = await Promise.all([
+    getTopTracks(userId, 'short_term', 50).catch((e) => ({ error: String(e) })),
+    getTopTracks(userId, 'medium_term', 50).catch((e) => ({ error: String(e) })),
+    getTopTracks(userId, 'long_term', 50).catch((e) => ({ error: String(e) })),
+    getTopArtistsFull(userId, 'medium_term', 20).catch((e) => ({ error: String(e) })),
     getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
   ])
 
-  const artistList = [
-    ...((Array.isArray(shortArtists) ? shortArtists : []) as SpotifyArtist[]),
-    ...((Array.isArray(mediumArtists) ? mediumArtists : []) as SpotifyArtist[]),
-    ...((Array.isArray(longArtists) ? longArtists : []) as SpotifyArtist[]),
-  ]
-  const firstArtist = artistList[0]
+  const genres = Array.isArray(artistsFull)
+    ? Array.from(new Set(artistsFull.flatMap(a => a.genres ?? []))).slice(0, 4)
+    : []
 
-  let topTracksResult: unknown = null
-  if (firstArtist) {
-    topTracksResult = await getArtistTopTracks(userId, firstArtist.id)
-      .then((t) => ({ ok: true, count: t.length, sample: t.slice(0, 3).map((x) => x.name) }))
-      .catch((e) => ({ ok: false, error: String(e) }))
+  let searchTest: unknown = null
+  if (genres.length > 0) {
+    searchTest = await searchTracks(userId, `genre:"${genres[0]}"`, 5)
+      .then(t => ({ ok: true, count: t.length, sample: t.slice(0, 3).map(x => `${x.name} - ${x.artists[0]?.name}`) }))
+      .catch(e => ({ ok: false, error: String(e) }))
   }
 
   return {
-    shortArtists: Array.isArray(shortArtists) ? shortArtists.map(a => a.name) : shortArtists,
-    mediumArtists: Array.isArray(mediumArtists) ? mediumArtists.map(a => a.name) : mediumArtists,
-    longArtists: Array.isArray(longArtists) ? longArtists.map(a => a.name) : longArtists,
+    tracksShort: Array.isArray(tracksShort) ? tracksShort.length : tracksShort,
+    tracksMedium: Array.isArray(tracksMedium) ? tracksMedium.length : tracksMedium,
+    tracksLong: Array.isArray(tracksLong) ? tracksLong.length : tracksLong,
     recentIdsCount: recentIds instanceof Set ? recentIds.size : 0,
-    firstArtist: firstArtist?.name,
-    topTracksResult,
+    genres,
+    searchTest,
   }
 }

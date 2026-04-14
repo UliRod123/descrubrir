@@ -85,18 +85,35 @@ export interface SpotifyArtistFull extends SpotifyArtist {
   genres: string[]
 }
 
-export async function getTopArtistsFull(userId: string): Promise<SpotifyArtistFull[]> {
-  const data = await spotifyFetch<{ items: SpotifyArtistFull[] }>(
+export async function getTopTracks(
+  userId: string,
+  timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term',
+  limit = 50
+): Promise<SpotifyTrack[]> {
+  const data = await spotifyFetch<{ items: SpotifyTrack[] }>(
     userId,
-    '/me/top/artists?time_range=medium_term&limit=10'
+    `/me/top/tracks?time_range=${timeRange}&limit=${limit}`
   )
   return data.items
 }
 
-export async function getTopTracks(userId: string): Promise<SpotifyTrack[]> {
-  const data = await spotifyFetch<{ items: SpotifyTrack[] }>(
+export async function searchTracks(userId: string, query: string, limit = 20): Promise<SpotifyTrack[]> {
+  const params = new URLSearchParams({ q: query, type: 'track', limit: String(limit), market: 'MX' })
+  const data = await spotifyFetch<{ tracks: { items: SpotifyTrack[] } }>(
     userId,
-    '/me/top/tracks?time_range=medium_term&limit=5'
+    `/search?${params.toString()}`
+  )
+  return data.tracks.items
+}
+
+export async function getTopArtistsFull(
+  userId: string,
+  timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term',
+  limit = 20
+): Promise<SpotifyArtistFull[]> {
+  const data = await spotifyFetch<{ items: SpotifyArtistFull[] }>(
+    userId,
+    `/me/top/artists?time_range=${timeRange}&limit=${limit}`
   )
   return data.items
 }
