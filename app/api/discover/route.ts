@@ -7,6 +7,44 @@ import { redis } from '@/lib/kv'
 const PLAYLIST_NAME = '🔀 Descubrir Ahora'
 const PLAYLIST_KEY = (userId: string) => `user:${userId}:discoverPlaylistId`
 
+async function ensurePlaylist(userId: string): Promise<string> {
+  const spotifyUserId = await getCurrentUserId(userId)
+  const playlistId = await createPlaylist(userId, spotifyUserId, PLAYLIST_NAME)
+  await redis.set(PLAYLIST_KEY(userId), playlistId)
+  return playlistId
+}
+
+async function updatePlaylist(userId: string, uris: string[]): Promise<string> {
+  let playlistId = await redis.get<string>(PLAYLIST_KEY(userId))
+
+  if (playlistId) {
+    // Try to update existing playlist; if it no longer exists, create a new one
+    try {
+      await replacePlaylistTracks(userId, playlistId, uris.slice(0, 100))
+      if (uris.length > 100) {
+        for (let i = 100; i < uris.length; i += 100) {
+          await addTracksToPlaylist(userId, playlistId, uris.slice(i, i + 100))
+        }
+      }
+      return playlistId
+    } catch {
+      // Playlist probably deleted — create fresh
+      await redis.del(PLAYLIST_KEY(userId))
+      playlistId = null
+    }
+  }
+
+  // Create new playlist
+  playlistId = await ensurePlaylist(userId)
+  await replacePlaylistTracks(userId, playlistId, uris.slice(0, 100))
+  if (uris.length > 100) {
+    for (let i = 100; i < uris.length; i += 100) {
+      await addTracksToPlaylist(userId, playlistId, uris.slice(i, i + 100))
+    }
+  }
+  return playlistId
+}
+
 export async function GET(req: NextRequest) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,7 +68,7 @@ export async function GET(req: NextRequest) {
 
   const uris = tracks.map(t => t.uri)
 
-  // Strategy 1: if count is small (≤10), try adding to queue (instant play)
+  // For small counts (≤10), try queue first (instant play)
   if (count <= 10) {
     let queuedCount = 0
     let queueFailed = false
@@ -48,29 +86,11 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Strategy 2 (default for large counts): update playlist — single API call, no timeout risk
+  // Default: playlist (single API call, no timeout risk)
   try {
-    let playlistId = await redis.get<string>(PLAYLIST_KEY(session.userId))
-
-    if (!playlistId) {
-      const spotifyUserId = await getCurrentUserId(session.userId)
-      playlistId = await createPlaylist(session.userId, spotifyUserId, PLAYLIST_NAME)
-      await redis.set(PLAYLIST_KEY(session.userId), playlistId)
-    }
-
-    // Spotify allows max 100 URIs per PUT — for larger batches use POST to add
-    if (uris.length <= 100) {
-      await replacePlaylistTracks(session.userId, playlistId, uris)
-    } else {
-      await replacePlaylistTracks(session.userId, playlistId, uris.slice(0, 100))
-      // Add remaining in chunks of 100
-      for (let i = 100; i < uris.length; i += 100) {
-        await addTracksToPlaylist(session.userId, playlistId, uris.slice(i, i + 100))
-      }
-    }
-
+    const playlistId = await updatePlaylist(session.userId, uris)
     return NextResponse.json({ tracks, queuedCount: 0, method: 'playlist', playlistId })
   } catch (err) {
-    return NextResponse.json({ tracks, queuedCount: 0, method: 'tracks_only', error: String(err) })
+    return NextResponse.json({ tracks, queuedCount: 0, method: 'tracks_only', error: String(err) }, { status: 500 })
   }
 }

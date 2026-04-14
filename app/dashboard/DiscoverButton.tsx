@@ -19,7 +19,7 @@ function songsForHours(hours: number): number {
 
 export default function DiscoverButton() {
   const [loading, setLoading] = useState(false)
-  const [lastTracks, setLastTracks] = useState<Track[]>([])
+  const [tracks, setTracks] = useState<Track[]>([])
   const [message, setMessage] = useState('')
   const [hours, setHours] = useState(1)
   const [playlistId, setPlaylistId] = useState<string | null>(null)
@@ -31,57 +31,49 @@ export default function DiscoverButton() {
 
   async function discover() {
     setLoading(true)
-    setMessage('')
-    setLastTracks([])
+    setMessage('Buscando canciones...')
+    setTracks([])
     setPlaylistId(null)
 
-    const allTracks: Track[] = []
-    // Fetch in batches of 50 — each batch = one playlist update (fast single API call)
-    const batchSize = 50
-    const batches = Math.ceil(count / batchSize)
+    try {
+      const res = await fetch(`/api/discover?count=${count}`)
+      const data = await res.json().catch(() => ({}))
 
-    for (let i = 0; i < batches; i++) {
-      const remaining = count - allTracks.length
-      const thisBatch = Math.min(batchSize, remaining)
-      try {
-        const res = await fetch(`/api/discover?count=${thisBatch}`)
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setMessage(
-            data.error === 'Unauthorized'
-              ? 'Sesión expirada, recarga la página.'
-              : `Error: ${data.error ?? 'desconocido'}`
-          )
-          setLoading(false)
-          return
-        }
-        if (data.tracks?.length) {
-          allTracks.push(...data.tracks)
-          setLastTracks([...allTracks])
-          if (data.playlistId) setPlaylistId(data.playlistId)
-          setMessage(`⏳ Cargando... ${allTracks.length} de ${count} canciones`)
-        }
-      } catch {
-        setMessage('Error de conexión.')
-        setLoading(false)
+      if (!res.ok) {
+        setMessage(
+          data.error === 'Unauthorized'
+            ? 'Sesión expirada, recarga la página.'
+            : `Error: ${data.error ?? 'desconocido'}`
+        )
         return
       }
-    }
 
-    if (allTracks.length === 0) {
-      setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
-    } else if (playlistId) {
-      setMessage(`✓ ${allTracks.length} canciones listas en "🔀 Descubrir Ahora"`)
-    } else {
-      setMessage(`✓ ${allTracks.length} canciones en tu cola (≈ ${displayTime})`)
+      if (!data.tracks?.length) {
+        setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
+        return
+      }
+
+      setTracks(data.tracks)
+
+      if (data.method === 'playlist' && data.playlistId) {
+        setPlaylistId(data.playlistId)
+        setMessage(`✓ ${data.tracks.length} canciones listas en "🔀 Descubrir Ahora"`)
+      } else if (data.method === 'queue') {
+        setMessage(`✓ ${data.tracks.length} canciones en tu cola (≈ ${displayTime})`)
+      } else {
+        setMessage(`✓ ${data.tracks.length} canciones encontradas`)
+      }
+    } catch {
+      setMessage('Error de conexión.')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   return (
     <div className="flex flex-col items-center gap-5 w-full">
 
-      {/* Custom hours input */}
+      {/* Hours selector */}
       <div className="w-full">
         <p className="text-zinc-400 text-sm mb-3 text-center">¿Cuántas horas quieres descubrir?</p>
 
@@ -127,16 +119,14 @@ export default function DiscoverButton() {
         disabled={loading}
         className="bg-green-500 hover:bg-green-400 disabled:opacity-50 text-black font-bold py-4 px-10 rounded-full text-xl transition-colors w-full max-w-sm"
       >
-        {loading
-          ? `Cargando... (${lastTracks.length}/${count})`
-          : '🔀 Descubrir ahora'}
+        {loading ? 'Buscando canciones...' : '🔀 Descubrir ahora'}
       </button>
 
       {message && (
         <div className="text-center">
           <p className={`font-medium text-sm ${
             message.startsWith('✓') ? 'text-green-400' :
-            message.startsWith('⏳') ? 'text-zinc-400' : 'text-yellow-400'
+            message.startsWith('Buscando') ? 'text-zinc-400' : 'text-yellow-400'
           }`}>
             {message}
           </p>
@@ -153,11 +143,13 @@ export default function DiscoverButton() {
         </div>
       )}
 
-      {lastTracks.length > 0 && (
+      {tracks.length > 0 && (
         <div className="w-full">
-          <p className="text-zinc-500 text-xs mb-2">{playlistId ? 'En tu playlist' : 'En tu cola'} ({lastTracks.length} canciones):</p>
+          <p className="text-zinc-500 text-xs mb-2">
+            {playlistId ? 'En tu playlist' : 'En tu cola'} ({tracks.length} canciones):
+          </p>
           <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
-            {lastTracks.map((track) => (
+            {tracks.map((track) => (
               <li key={track.id} className="flex items-center gap-3 bg-zinc-800 rounded-lg p-3">
                 {track.albumArt && (
                   <img src={track.albumArt} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
