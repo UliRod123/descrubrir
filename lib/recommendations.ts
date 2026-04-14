@@ -56,11 +56,11 @@ export async function getRecommendations(
   const knownArtistIds = new Set(knownArtistMap.keys())
 
   // Pool A: unseen tracks from known artists
-  const poolAPromises = knownArtists.slice(0, 10).map(async (artist) => {
+  const poolAPromises = knownArtists.slice(0, 20).map(async (artist) => {
     try {
       const albumIds = await getArtistAlbums(userId, artist.id)
       const trackArrays = await Promise.all(
-        albumIds.slice(0, 3).map((id) => getAlbumTracks(userId, id))
+        albumIds.slice(0, 5).map((id) => getAlbumTracks(userId, id))
       )
       return trackArrays.flat().filter((t) => t.id && !recentIds.has(t.id))
     } catch {
@@ -103,12 +103,19 @@ export async function getRecommendations(
   const poolBIdSet = new Set(poolBFiltered)
   const poolB = poolBRaw.filter((t) => poolBIdSet.has(t.id))
 
-  // Mix 50/50
+  // Mix: try 50/50 but let each pool compensate if the other runs short
+  const shuffledA = shuffle(poolA)
+  const shuffledB = shuffle(poolB)
   const half = Math.ceil(count / 2)
-  const selectedA = shuffle(poolA).slice(0, half).map((t) => toRecommended(t, false))
-  const selectedB = shuffle(poolB)
-    .slice(0, count - selectedA.length)
-    .map((t) => toRecommended(t, true))
+
+  // Take up to half from each, then fill gaps from the other pool
+  const fromA = shuffledA.slice(0, half)
+  const fromB = shuffledB.slice(0, count - fromA.length)
+  const remaining = count - fromA.length - fromB.length
+  const extra = remaining > 0 ? shuffledA.slice(half, half + remaining) : []
+
+  const selectedA = [...fromA, ...extra].map((t) => toRecommended(t, false))
+  const selectedB = fromB.map((t) => toRecommended(t, true))
 
   const combined = shuffle([...selectedA, ...selectedB])
 
