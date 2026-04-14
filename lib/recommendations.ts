@@ -55,11 +55,13 @@ export async function getRecommendations(
 
   // Fetch base data in parallel — all 3 time ranges for best coverage
   const [shortArtists, mediumArtists, longArtists, recentIds] = await Promise.all([
-    getTopArtists(userId, 'short_term').catch(() => [] as SpotifyArtist[]),
-    getTopArtists(userId, 'medium_term').catch(() => [] as SpotifyArtist[]),
-    getTopArtists(userId, 'long_term').catch(() => [] as SpotifyArtist[]),
-    getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
+    getTopArtists(userId, 'short_term').catch((e) => { console.error('[recs] short_term error:', e); return [] as SpotifyArtist[] }),
+    getTopArtists(userId, 'medium_term').catch((e) => { console.error('[recs] medium_term error:', e); return [] as SpotifyArtist[] }),
+    getTopArtists(userId, 'long_term').catch((e) => { console.error('[recs] long_term error:', e); return [] as SpotifyArtist[] }),
+    getRecentlyPlayedTrackIds(userId).catch((e) => { console.error('[recs] recentIds error:', e); return new Set<string>() }),
   ])
+
+  console.log(`[recs] artists: short=${shortArtists.length} medium=${mediumArtists.length} long=${longArtists.length} recentIds=${recentIds.size}`)
 
   // Deduplicate known artists across all time ranges
   const artistMap = new Map<string, SpotifyArtist>()
@@ -67,15 +69,27 @@ export async function getRecommendations(
   const knownArtists = Array.from(artistMap.values())
   const knownArtistIds = new Set(artistMap.keys())
 
-  if (knownArtists.length === 0) return []
+  console.log(`[recs] knownArtists total: ${knownArtists.length} — ${knownArtists.slice(0, 5).map(a => a.name).join(', ')}`)
+
+  if (knownArtists.length === 0) {
+    console.error('[recs] ABORT: no known artists')
+    return []
+  }
 
   // Pool A: top tracks from known artists (top 8 for more variety)
   const poolAResults = await Promise.allSettled(
     knownArtists.slice(0, 8).map((a) => getArtistTopTracks(userId, a.id))
   )
+  poolAResults.forEach((r, i) => {
+    if (r.status === 'rejected') console.error(`[recs] poolA artist[${i}] ${knownArtists[i]?.name} error:`, r.reason)
+    else console.log(`[recs] poolA artist[${i}] ${knownArtists[i]?.name}: ${r.value.length} tracks`)
+  })
+
   const poolARaw = poolAResults
     .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
     .filter((t) => t.id && t.uri && !recentIds.has(t.id))
+
+  console.log(`[recs] poolARaw after recentIds filter: ${poolARaw.length}`)
 
   // Pool B: get related artists then their top tracks
   const relatedResults = await Promise.allSettled(
@@ -92,12 +106,16 @@ export async function getRecommendations(
     )
   ).slice(0, 8)
 
+  console.log(`[recs] newArtists for poolB: ${newArtists.length} — ${newArtists.slice(0, 3).map(a => a.name).join(', ')}`)
+
   const poolBResults = await Promise.allSettled(
     newArtists.map((a) => getArtistTopTracks(userId, a.id))
   )
   const poolBRaw = poolBResults
     .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
     .filter((t) => t.id && t.uri && !recentIds.has(t.id))
+
+  console.log(`[recs] poolBRaw after recentIds filter: ${poolBRaw.length}`)
 
   // Filter already recommended
   const [poolAFiltered, poolBFiltered] = await Promise.all([
@@ -110,15 +128,19 @@ export async function getRecommendations(
   let poolA = poolARaw.filter((t) => poolASet.has(t.id))
   let poolB = poolBRaw.filter((t) => poolBSet.has(t.id))
 
+  console.log(`[recs] after filterOutRecommended: poolA=${poolA.length} poolB=${poolB.length} (raw: A=${poolARaw.length} B=${poolBRaw.length})`)
+
   // Auto-reset history if both pools exhausted
   if (poolA.length === 0 && poolB.length === 0) {
+    console.log('[recs] both pools exhausted — clearing history and retrying')
     await clearRecommendedHistory(userId)
     poolA = shuffle(poolARaw)
     poolB = shuffle(poolBRaw)
+    console.log(`[recs] after reset: poolA=${poolA.length} poolB=${poolB.length}`)
   }
 
-  // If still empty after reset, pools themselves are empty — return error info
   if (poolA.length === 0 && poolB.length === 0) {
+    console.error('[recs] ABORT: pools empty even after reset — poolARaw and poolBRaw are both empty')
     return []
   }
 
@@ -132,6 +154,7 @@ export async function getRecommendations(
     : []
 
   const combined = shuffle([...fromA, ...fromB, ...extra])
+  console.log(`[recs] final: ${combined.length} tracks (fromA=${fromA.length} fromB=${fromB.length} extra=${extra.length})`)
 
   if (combined.length > 0) {
     await addRecommended(userId, combined.map((t) => t.id))
@@ -150,9 +173,9 @@ export async function getRecommendationsDiagnostics(userId: string): Promise<Rec
   ])
 
   const artistList = [
-    ...((shortArtists as SpotifyArtist[]) ?? []),
-    ...((mediumArtists as SpotifyArtist[]) ?? []),
-    ...((longArtists as SpotifyArtist[]) ?? []),
+    ...((Array.isArray(shortArtists) ? shortArtists : []) as SpotifyArtist[]),
+    ...((Array.isArray(mediumArtists) ? mediumArtists : []) as SpotifyArtist[]),
+    ...((Array.isArray(longArtists) ? longArtists : []) as SpotifyArtist[]),
   ]
   const firstArtist = artistList[0]
 
@@ -164,9 +187,9 @@ export async function getRecommendationsDiagnostics(userId: string): Promise<Rec
   }
 
   return {
-    shortArtistsCount: Array.isArray(shortArtists) ? shortArtists.length : shortArtists,
-    mediumArtistsCount: Array.isArray(mediumArtists) ? mediumArtists.length : mediumArtists,
-    longArtistsCount: Array.isArray(longArtists) ? longArtists.length : longArtists,
+    shortArtists: Array.isArray(shortArtists) ? shortArtists.map(a => a.name) : shortArtists,
+    mediumArtists: Array.isArray(mediumArtists) ? mediumArtists.map(a => a.name) : mediumArtists,
+    longArtists: Array.isArray(longArtists) ? longArtists.map(a => a.name) : longArtists,
     recentIdsCount: recentIds instanceof Set ? recentIds.size : 0,
     firstArtist: firstArtist?.name,
     topTracksResult,
