@@ -83,9 +83,9 @@ export async function getRecommendations(
   for (const id of recentIds) knownTrackIds.add(id)
 
   // Discovery pool: search results only — tracks the user hasn't heard
-  const topArtists = artists.slice(0, 20)
+  const topArtists = artists.slice(0, 10)
 
-  const artistQueries = topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 50))
+  const artistQueries = topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 30))
   const keywordQueries: Promise<SpotifyTrack[]>[] = []
   for (const mode of activeModes) {
     if (mode === 'mis-artistas') continue
