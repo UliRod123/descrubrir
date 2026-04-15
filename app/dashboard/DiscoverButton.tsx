@@ -76,19 +76,30 @@ export default function DiscoverButton() {
         const res = await fetch(`/api/discover?count=${thisBatch}&modes=${modes.join(',')}`)
         const data = await res.json().catch(() => ({}))
 
-        if (!res.ok || data.error) {
-          if (all.length > 0) break // partial success — stop gracefully
-          const deviceMsg = data.deviceFound === false ? ' (no se detectó ningún dispositivo Spotify activo)' : ''
-          setMessage((data.error || 'Error desconocido') + deviceMsg)
+        if (!res.ok) {
+          if (all.length > 0) break
+          setMessage(data.error || 'Error de conexión')
           setLoading(false)
           return
         }
 
-        if (data.tracks?.length) {
-          all.push(...data.tracks)
-          setAddedTracks([...all])
-          setMessage(`⏳ ${all.length} de ${count} canciones en cola...`)
+        if (data.error) {
+          if (all.length > 0) break
+          setMessage(data.error)
+          setLoading(false)
+          return
         }
+
+        if (!data.tracks?.length) {
+          if (all.length > 0) break
+          setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
+          setLoading(false)
+          return
+        }
+
+        all.push(...data.tracks)
+        setAddedTracks([...all])
+        setMessage(`⏳ ${all.length} de ${count} canciones en cola...`)
       } catch {
         if (all.length > 0) break
         setMessage('Error de conexión.')
@@ -98,9 +109,7 @@ export default function DiscoverButton() {
     }
 
     setLoading(false)
-    if (all.length === 0) {
-      setMessage('Abre Spotify y pon algo a reproducir primero, luego intenta de nuevo.')
-    } else {
+    if (all.length > 0) {
       setMessage(`✓ ${all.length} canciones agregadas a tu cola de Spotify (≈ ${displayTime})`)
     }
   }
