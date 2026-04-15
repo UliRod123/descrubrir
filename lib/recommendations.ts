@@ -74,15 +74,8 @@ export async function getRecommendations(
 
   const knownArtistIds = new Set(artists.map(a => a.id))
 
-  // Build exclusion set: songs the user ALREADY knows (top tracks + recently played)
-  // These should never be recommended — they're not "discoveries"
-  const knownTrackIds = new Set<string>()
-  for (const t of [...tracksShort, ...tracksMedium, ...tracksLong]) {
-    if (t.id) knownTrackIds.add(t.id)
-  }
-  for (const id of recentIds) knownTrackIds.add(id)
-
-  // Discovery pool: search results only — tracks the user hasn't heard
+  // Discovery pool: search results filtered only by recently played
+  // (Redis anti-repeat history handles not repeating recommendations)
   const topArtists = artists.slice(0, 10)
 
   const artistQueries = topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 30))
@@ -100,8 +93,7 @@ export async function getRecommendations(
   for (const result of searchResults) {
     if (result.status === 'fulfilled') {
       for (const t of result.value) {
-        // Skip if user already knows this track
-        if (t.id && t.uri && !knownTrackIds.has(t.id)) {
+        if (t.id && t.uri && !recentIds.has(t.id)) {
           poolMap.set(t.id, t)
         }
       }
