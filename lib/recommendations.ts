@@ -122,7 +122,16 @@ export async function getRecommendations(
 
   if (pool.length === 0) return []
 
-  const combined = shuffle(pool).slice(0, count).map(t => toRecommended(t, knownArtistIds))
+  // Deduplicate by name+artist (same song can appear as single and album version)
+  const seen = new Set<string>()
+  const deduped = shuffle(pool).filter(t => {
+    const key = `${t.name.toLowerCase()}:::${t.artists[0]?.name.toLowerCase()}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  const combined = deduped.slice(0, count).map(t => toRecommended(t, knownArtistIds))
 
   if (combined.length > 0) {
     await addRecommended(userId, combined.map(t => t.id))

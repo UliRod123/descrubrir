@@ -167,7 +167,7 @@ export default function DiscoverButton() {
             }`}
             aria-pressed={modes.includes('ingles')}
           >
-            🇺🇸 Inglés
+            EN Inglés
           </button>
           <button
             disabled={loading}
@@ -183,23 +183,16 @@ export default function DiscoverButton() {
       </div>
 
       {/* Spotify live status */}
-      <div className="w-full text-center">
-        {playerStatus === null ? (
-          <p className="text-zinc-600 text-xs">Verificando Spotify...</p>
-        ) : playerStatus.isPlaying ? (
-          <p className="text-green-400 text-xs">
-            🟢 Spotify activo en <span className="font-semibold">{playerStatus.currentDevice}</span>
-            {playerStatus.currentTrack && <span className="text-zinc-400"> · {playerStatus.currentTrack}</span>}
-          </p>
-        ) : playerStatus.currentDevice ? (
-          <p className="text-yellow-400 text-xs">
-            ⏸ {playerStatus.currentDevice} pausado — pon algo a reproducir
-          </p>
-        ) : (
-          <p className="text-red-400 text-xs">
-            🔴 No se detecta Spotify activo — abre la app y reproduce algo
-          </p>
-        )}
+      <div className={`w-full text-center py-2 px-4 rounded-lg text-sm font-medium ${
+        playerStatus === null ? 'bg-zinc-800 text-zinc-400' :
+        playerStatus.isPlaying ? 'bg-green-900/50 text-green-300' :
+        playerStatus.currentDevice ? 'bg-yellow-900/50 text-yellow-300' :
+        'bg-red-900/50 text-red-300'
+      }`}>
+        {playerStatus === null ? '⏳ Verificando Spotify...' :
+         playerStatus.isPlaying ? `🟢 Activo en ${playerStatus.currentDevice}${playerStatus.currentTrack ? ` · ${playerStatus.currentTrack}` : ''}` :
+         playerStatus.currentDevice ? `⏸ ${playerStatus.currentDevice} pausado — reproduce algo primero` :
+         '🔴 No se detecta Spotify — abre la app y pon algo a reproducir'}
       </div>
 
       {/* Main button */}
