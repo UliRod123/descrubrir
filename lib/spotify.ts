@@ -54,7 +54,13 @@ export async function spotifyFetch<T>(
   }
 
   if (res.status === 204) return {} as T
-  return res.json()
+  const text = await res.text()
+  if (!text) return {} as T
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {} as T
+  }
 }
 
 export interface SpotifyArtist {
