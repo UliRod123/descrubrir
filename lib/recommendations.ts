@@ -1,5 +1,4 @@
 import {
-  getTopTracks,
   getTopArtistsFull,
   searchTracks,
   getRecentlyPlayedTrackIds,
@@ -63,11 +62,8 @@ export async function getRecommendations(
     if (cached && cached.length >= Math.min(count, 10)) return cached.slice(0, count)
   }
 
-  // Fetch all user data in parallel
-  const [tracksShort, tracksMedium, tracksLong, artists, recentIds] = await Promise.all([
-    getTopTracks(userId, 'short_term', 50).catch(() => [] as SpotifyTrack[]),
-    getTopTracks(userId, 'medium_term', 50).catch(() => [] as SpotifyTrack[]),
-    getTopTracks(userId, 'long_term', 50).catch(() => [] as SpotifyTrack[]),
+  // Fetch user data
+  const [artists, recentIds] = await Promise.all([
     getTopArtistsFull(userId, 'medium_term', 20).catch(() => []),
     getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
   ])
@@ -134,8 +130,7 @@ export async function getRecommendations(
 }
 
 export async function getRecommendationsDiagnostics(userId: string): Promise<Record<string, unknown>> {
-  const [tracksShort, artists, recentIds] = await Promise.all([
-    getTopTracks(userId, 'short_term', 50).catch(e => ({ error: String(e) })),
+  const [artists, recentIds] = await Promise.all([
     getTopArtistsFull(userId, 'medium_term', 20).catch(e => ({ error: String(e) })),
     getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
   ])
@@ -149,7 +144,6 @@ export async function getRecommendationsDiagnostics(userId: string): Promise<Rec
   }
 
   return {
-    topTracksCount: Array.isArray(tracksShort) ? tracksShort.length : tracksShort,
     recentIdsCount: recentIds instanceof Set ? recentIds.size : 0,
     artistCount: Array.isArray(artists) ? artists.length : artists,
     searchTest,

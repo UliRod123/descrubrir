@@ -41,8 +41,10 @@ export async function filterOutRecommended(userId: string, trackIds: string[]): 
   for (const id of trackIds) {
     pipeline.sismember(`user:${userId}:recommended`, id)
   }
-  const results = await pipeline.exec<number[]>()
-  return trackIds.filter((_, i) => results[i] === 0)
+  const results = await pipeline.exec()
+  // Accept 0, null, or false — all mean "not in set".
+  // Only 1 / true means "is in set" (already recommended).
+  return trackIds.filter((_, i) => !results[i])
 }
 
 export async function getAllUserIds(): Promise<string[]> {
