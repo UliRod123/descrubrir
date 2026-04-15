@@ -211,8 +211,9 @@ export async function replacePlaylistTracks(
   playlistId: string,
   uris: string[]
 ): Promise<void> {
+  // POST adds tracks; we create a fresh playlist each time so no need to clear
   await spotifyFetch(userId, `/playlists/${playlistId}/tracks`, {
-    method: 'PUT',
+    method: 'POST',
     body: JSON.stringify({ uris }),
   })
 }

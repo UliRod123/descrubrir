@@ -22,21 +22,10 @@ async function writeTracks(userId: string, playlistId: string, uris: string[]): 
 }
 
 async function updatePlaylist(userId: string, uris: string[]): Promise<string> {
-  let playlistId = await redis.get<string>(PLAYLIST_KEY(userId))
-
-  if (playlistId) {
-    try {
-      await writeTracks(userId, playlistId, uris)
-      return playlistId
-    } catch {
-      // Playlist probably deleted — create fresh
-      await redis.del(PLAYLIST_KEY(userId))
-      playlistId = null
-    }
-  }
-
-  // Create new playlist then write tracks
-  playlistId = await ensurePlaylist(userId)
+  // Always create a fresh playlist so we don't accumulate tracks from previous runs
+  // (PUT /replace is restricted for new Spotify apps; POST /add is not)
+  await redis.del(PLAYLIST_KEY(userId))
+  const playlistId = await ensurePlaylist(userId)
   await writeTracks(userId, playlistId, uris)
   return playlistId
 }

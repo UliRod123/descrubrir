@@ -19,10 +19,11 @@ export async function GET() {
   let addTracksTest: unknown = 'skipped'
   if ((createTest as { ok: boolean }).ok) {
     const pid = (createTest as { playlistId: string }).playlistId
+    // Try POST (add) instead of PUT (replace)
     addTracksTest = await spotifyFetch(session.userId, `/playlists/${pid}/tracks`, {
-      method: 'PUT',
-      body: JSON.stringify({ uris: ['spotify:track:4iV5W9uYEdYUVa79Axb7Rh'] }), // known valid URI (Mr. Brightside)
-    }).then(() => ({ ok: true })).catch(e => ({ ok: false, error: String(e) }))
+      method: 'POST',
+      body: JSON.stringify({ uris: ['spotify:track:4iV5W9uYEdYUVa79Axb7Rh'] }),
+    }).then(() => ({ ok: true, method: 'POST' })).catch(e => ({ ok: false, method: 'POST', error: String(e) }))
 
     // Clean up
     await spotifyFetch(session.userId, `/playlists/${pid}/followers`, { method: 'DELETE' }).catch(() => {})
