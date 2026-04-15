@@ -12,6 +12,8 @@ interface Track {
 
 const AVG_SONG_MINUTES = 3.5
 const MAX_HOURS = 8
+// How many songs to add per API call — each call takes ~2-3s in parallel
+const BATCH_SIZE = 17
 
 function songsForHours(hours: number): number {
   return Math.max(1, Math.round((hours * 60) / AVG_SONG_MINUTES))
@@ -19,10 +21,9 @@ function songsForHours(hours: number): number {
 
 export default function DiscoverButton() {
   const [loading, setLoading] = useState(false)
-  const [tracks, setTracks] = useState<Track[]>([])
+  const [addedTracks, setAddedTracks] = useState<Track[]>([])
   const [message, setMessage] = useState('')
   const [hours, setHours] = useState(1)
-  const [playlistId, setPlaylistId] = useState<string | null>(null)
 
   const count = songsForHours(hours)
   const displayTime = hours < 1
@@ -31,42 +32,45 @@ export default function DiscoverButton() {
 
   async function discover() {
     setLoading(true)
-    setMessage('Buscando canciones...')
-    setTracks([])
-    setPlaylistId(null)
+    setMessage('Agregando canciones a tu cola...')
+    setAddedTracks([])
 
-    try {
-      const res = await fetch(`/api/discover?count=${count}`)
-      const data = await res.json().catch(() => ({}))
+    const all: Track[] = []
+    const batches = Math.ceil(count / BATCH_SIZE)
 
-      if (!res.ok) {
-        setMessage(
-          data.error === 'Unauthorized'
-            ? 'Sesión expirada, recarga la página.'
-            : `Error: ${data.error ?? 'desconocido'}`
-        )
+    for (let i = 0; i < batches; i++) {
+      const remaining = count - all.length
+      const thisBatch = Math.min(BATCH_SIZE, remaining)
+
+      try {
+        const res = await fetch(`/api/discover?count=${thisBatch}`)
+        const data = await res.json().catch(() => ({}))
+
+        if (!res.ok || data.error) {
+          if (all.length > 0) break // partial success — stop gracefully
+          setMessage(`Abre Spotify y pon algo a reproducir primero, luego intenta de nuevo.`)
+          setLoading(false)
+          return
+        }
+
+        if (data.tracks?.length) {
+          all.push(...data.tracks)
+          setAddedTracks([...all])
+          setMessage(`⏳ ${all.length} de ${count} canciones en cola...`)
+        }
+      } catch {
+        if (all.length > 0) break
+        setMessage('Error de conexión.')
+        setLoading(false)
         return
       }
+    }
 
-      if (!data.tracks?.length) {
-        setMessage('No se encontraron canciones nuevas. Intenta de nuevo.')
-        return
-      }
-
-      setTracks(data.tracks)
-
-      if (data.method === 'playlist' && data.playlistId) {
-        setPlaylistId(data.playlistId)
-        setMessage(`✓ ${data.tracks.length} canciones listas en "🔀 Descubrir Ahora"`)
-      } else if (data.method === 'queue') {
-        setMessage(`✓ ${data.tracks.length} canciones en tu cola (≈ ${displayTime})`)
-      } else {
-        setMessage(`✓ ${data.tracks.length} canciones encontradas`)
-      }
-    } catch {
-      setMessage('Error de conexión.')
-    } finally {
-      setLoading(false)
+    setLoading(false)
+    if (all.length === 0) {
+      setMessage('Abre Spotify y pon algo a reproducir primero, luego intenta de nuevo.')
+    } else {
+      setMessage(`✓ ${all.length} canciones agregadas a tu cola de Spotify (≈ ${displayTime})`)
     }
   }
 
@@ -76,7 +80,6 @@ export default function DiscoverButton() {
       {/* Hours selector */}
       <div className="w-full">
         <p className="text-zinc-400 text-sm mb-3 text-center">¿Cuántas horas quieres descubrir?</p>
-
         <div className="flex items-center gap-3 justify-center">
           <button
             onClick={() => setHours(h => Math.max(0.5, Math.round((h - 0.5) * 2) / 2))}
@@ -96,7 +99,6 @@ export default function DiscoverButton() {
           >+</button>
         </div>
 
-        {/* Quick presets */}
         <div className="flex gap-2 justify-center mt-3 flex-wrap">
           {[0.5, 1, 2, 3, 4].map((h) => (
             <button
@@ -119,37 +121,25 @@ export default function DiscoverButton() {
         disabled={loading}
         className="bg-green-500 hover:bg-green-400 disabled:opacity-50 text-black font-bold py-4 px-10 rounded-full text-xl transition-colors w-full max-w-sm"
       >
-        {loading ? 'Buscando canciones...' : '🔀 Descubrir ahora'}
+        {loading
+          ? `Agregando... (${addedTracks.length}/${count})`
+          : '🔀 Descubrir ahora'}
       </button>
 
       {message && (
-        <div className="text-center">
-          <p className={`font-medium text-sm ${
-            message.startsWith('✓') ? 'text-green-400' :
-            message.startsWith('Buscando') ? 'text-zinc-400' : 'text-yellow-400'
-          }`}>
-            {message}
-          </p>
-          {playlistId && message.startsWith('✓') && (
-            <a
-              href={`https://open.spotify.com/playlist/${playlistId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-green-500 underline text-xs mt-1 inline-block"
-            >
-              Abrir playlist en Spotify →
-            </a>
-          )}
-        </div>
+        <p className={`text-sm text-center font-medium ${
+          message.startsWith('✓') ? 'text-green-400' :
+          message.startsWith('⏳') ? 'text-zinc-400' : 'text-yellow-400'
+        }`}>
+          {message}
+        </p>
       )}
 
-      {tracks.length > 0 && (
+      {addedTracks.length > 0 && (
         <div className="w-full">
-          <p className="text-zinc-500 text-xs mb-2">
-            {playlistId ? 'En tu playlist' : 'En tu cola'} ({tracks.length} canciones):
-          </p>
+          <p className="text-zinc-500 text-xs mb-2">En tu cola ({addedTracks.length} canciones):</p>
           <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
-            {tracks.map((track) => (
+            {addedTracks.map((track) => (
               <li key={track.id} className="flex items-center gap-3 bg-zinc-800 rounded-lg p-3">
                 {track.albumArt && (
                   <img src={track.albumArt} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
