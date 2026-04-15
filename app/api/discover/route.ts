@@ -13,18 +13,20 @@ async function ensurePlaylist(userId: string): Promise<string> {
   return playlistId
 }
 
+async function writeTracks(userId: string, playlistId: string, uris: string[]): Promise<void> {
+  // Replace first batch (clears playlist), then append the rest
+  await replacePlaylistTracks(userId, playlistId, uris.slice(0, 100))
+  for (let i = 100; i < uris.length; i += 100) {
+    await addTracksToPlaylist(userId, playlistId, uris.slice(i, i + 100))
+  }
+}
+
 async function updatePlaylist(userId: string, uris: string[]): Promise<string> {
   let playlistId = await redis.get<string>(PLAYLIST_KEY(userId))
 
   if (playlistId) {
-    // Try to update existing playlist; if it no longer exists, create a new one
     try {
-      await replacePlaylistTracks(userId, playlistId, uris.slice(0, 100))
-      if (uris.length > 100) {
-        for (let i = 100; i < uris.length; i += 100) {
-          await addTracksToPlaylist(userId, playlistId, uris.slice(i, i + 100))
-        }
-      }
+      await writeTracks(userId, playlistId, uris)
       return playlistId
     } catch {
       // Playlist probably deleted — create fresh
@@ -33,14 +35,9 @@ async function updatePlaylist(userId: string, uris: string[]): Promise<string> {
     }
   }
 
-  // Create new playlist
+  // Create new playlist then write tracks
   playlistId = await ensurePlaylist(userId)
-  await replacePlaylistTracks(userId, playlistId, uris.slice(0, 100))
-  if (uris.length > 100) {
-    for (let i = 100; i < uris.length; i += 100) {
-      await addTracksToPlaylist(userId, playlistId, uris.slice(i, i + 100))
-    }
-  }
+  await writeTracks(userId, playlistId, uris)
   return playlistId
 }
 
@@ -85,9 +82,15 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Sanitize URIs — only valid spotify:track:xxx format
+  const validUris = uris.filter(u => u && u.startsWith('spotify:track:'))
+  if (validUris.length === 0) {
+    return NextResponse.json({ tracks, queuedCount: 0, method: 'none', error: 'No valid track URIs' })
+  }
+
   // Default: playlist (single API call, no timeout risk)
   try {
-    const playlistId = await updatePlaylist(session.userId, uris)
+    const playlistId = await updatePlaylist(session.userId, validUris)
     return NextResponse.json({ tracks, queuedCount: 0, method: 'playlist', playlistId })
   } catch (err) {
     return NextResponse.json({ tracks, queuedCount: 0, method: 'tracks_only', error: String(err) }, { status: 500 })
