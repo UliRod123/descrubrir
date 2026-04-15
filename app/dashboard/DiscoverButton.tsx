@@ -58,7 +58,8 @@ export default function DiscoverButton() {
 
         if (!res.ok || data.error) {
           if (all.length > 0) break // partial success — stop gracefully
-          setMessage(data.error || 'Error desconocido')
+          const deviceMsg = data.deviceFound === false ? ' (no se detectó ningún dispositivo Spotify activo)' : ''
+          setMessage((data.error || 'Error desconocido') + deviceMsg)
           setLoading(false)
           return
         }

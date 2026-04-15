@@ -181,10 +181,21 @@ export async function getArtistTopTracks(userId: string, artistId: string): Prom
   return data.tracks
 }
 
-export async function addToQueue(userId: string, trackUri: string): Promise<void> {
-  await spotifyFetch(userId, `/me/player/queue?uri=${encodeURIComponent(trackUri)}`, {
-    method: 'POST',
-  })
+export async function getActiveDeviceId(userId: string): Promise<string | null> {
+  const data = await spotifyFetch<{ devices: { id: string; is_active: boolean; is_restricted: boolean }[] }>(
+    userId, '/me/player/devices'
+  )
+  const devices = data.devices ?? []
+  // Prefer active device, fall back to any available device
+  const active = devices.find(d => d.is_active && !d.is_restricted)
+    ?? devices.find(d => !d.is_restricted)
+  return active?.id ?? null
+}
+
+export async function addToQueue(userId: string, trackUri: string, deviceId?: string | null): Promise<void> {
+  const params = new URLSearchParams({ uri: trackUri })
+  if (deviceId) params.set('device_id', deviceId)
+  await spotifyFetch(userId, `/me/player/queue?${params.toString()}`, { method: 'POST' })
 }
 
 export async function getCurrentUserId(userId: string): Promise<string> {

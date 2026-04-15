@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { getRecommendations, getRecommendationsDiagnostics, DiscoveryMode } from '@/lib/recommendations'
-import { addToQueue } from '@/lib/spotify'
+import { addToQueue, getActiveDeviceId } from '@/lib/spotify'
 
 export async function GET(req: NextRequest) {
   const session = await getSession()
@@ -32,7 +32,10 @@ export async function GET(req: NextRequest) {
 
   const uris = tracks.map(t => t.uri).filter(u => u?.startsWith('spotify:track:'))
 
-  // Add to queue in parallel batches of 10 — fast enough to stay within timeout
+  // Get active device ID once, then target it explicitly for all queue additions
+  const deviceId = await getActiveDeviceId(session.userId).catch(() => null)
+
+  // Add to queue in parallel batches of 10
   const BATCH = 10
   let queuedCount = 0
   let lastError = ''
@@ -40,7 +43,7 @@ export async function GET(req: NextRequest) {
   for (let i = 0; i < uris.length; i += BATCH) {
     const batch = uris.slice(i, i + BATCH)
     const results = await Promise.allSettled(
-      batch.map(uri => addToQueue(session.userId, uri))
+      batch.map(uri => addToQueue(session.userId, uri, deviceId))
     )
     for (const r of results) {
       if (r.status === 'fulfilled') queuedCount++
@@ -53,7 +56,8 @@ export async function GET(req: NextRequest) {
       tracks: [],
       queuedCount: 0,
       method: 'none',
-      error: lastError || 'No se pudo agregar a la cola. Asegúrate de tener Spotify abierto y reproduciendo.',
+      deviceFound: !!deviceId,
+      error: lastError || 'No se pudo agregar a la cola.',
     })
   }
 
