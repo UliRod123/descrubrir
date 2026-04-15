@@ -21,18 +21,27 @@ export async function GET() {
   const recentIds = await getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>())
   const recentCount = recentIds instanceof Set ? recentIds.size : 0
 
-  // ── Step 3: Sample search (first 3 artists) ──────────────────────────────────
+  // ── Step 3+4: Pool — batched to avoid 429 ────────────────────────────────────
   const sampleSearches: Record<string, unknown> = {}
-  for (const a of topArtists.slice(0, 3)) {
-    const query = `artist:"${a.name}"`
-    sampleSearches[a.name] = await searchTracks(userId, query, 10)
-      .then(tracks => ({ ok: true, count: tracks.length, sample: tracks.slice(0, 2).map(t => `${t.name} — ${t.artists[0]?.name}`) }))
-      .catch(e => ({ ok: false, error: String(e) }))
+  const artistQueryFns = topArtists.map(a => () => searchTracks(userId, `artist:"${a.name}"`, 30))
+  const BATCH = 3
+  const DELAY = 600
+  const searchResults: PromiseSettledResult<ReturnType<typeof searchTracks> extends Promise<infer U> ? U : never>[] = []
+  for (let i = 0; i < artistQueryFns.length; i += BATCH) {
+    const batch = artistQueryFns.slice(i, i + BATCH)
+    const batchResults = await Promise.allSettled(batch.map(fn => fn()))
+    searchResults.push(...batchResults as typeof searchResults)
+    if (i + BATCH < artistQueryFns.length) {
+      await new Promise(r => setTimeout(r, DELAY))
+    }
   }
-
-  // ── Step 4: Full pool (all 10 artists) ───────────────────────────────────────
-  const artistQueries = topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 30))
-  const searchResults = await Promise.allSettled(artistQueries)
+  // Show sample from first 3 results
+  for (let i = 0; i < Math.min(3, topArtists.length); i++) {
+    const r = searchResults[i]
+    sampleSearches[topArtists[i].name] = r.status === 'fulfilled'
+      ? { ok: true, count: r.value.length, sample: r.value.slice(0, 2).map(t => `${t.name} — ${t.artists[0]?.name}`) }
+      : { ok: false, error: String((r as PromiseRejectedResult).reason) }
+  }
 
   let searchFulfilled = 0
   let searchRejected = 0

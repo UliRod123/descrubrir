@@ -72,18 +72,31 @@ export async function getRecommendations(
 
   // Discovery pool: search results filtered only by recently played
   // (Redis anti-repeat history handles not repeating recommendations)
-  const topArtists = artists.slice(0, 10)
+  const topArtists = artists.slice(0, 8)
 
-  const artistQueries = topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 30))
-  const keywordQueries: Promise<SpotifyTrack[]>[] = []
+  // Build all query functions (lazy — not started yet)
+  const allQueries: (() => Promise<SpotifyTrack[]>)[] = [
+    ...topArtists.map(a => () => searchTracks(userId, `artist:"${a.name}"`, 40)),
+  ]
   for (const mode of activeModes) {
     if (mode === 'mis-artistas') continue
     for (const kw of MODE_KEYWORDS[mode as Exclude<DiscoveryMode, 'mis-artistas'>]) {
-      keywordQueries.push(searchTracks(userId, kw, 50))
+      allQueries.push(() => searchTracks(userId, kw, 50))
     }
   }
 
-  const searchResults = await Promise.allSettled([...artistQueries, ...keywordQueries])
+  // Run in batches of 3 with 600ms pause to avoid Spotify 429
+  const BATCH = 3
+  const DELAY = 600
+  const searchResults: PromiseSettledResult<SpotifyTrack[]>[] = []
+  for (let i = 0; i < allQueries.length; i += BATCH) {
+    const batch = allQueries.slice(i, i + BATCH)
+    const batchResults = await Promise.allSettled(batch.map(fn => fn()))
+    searchResults.push(...batchResults)
+    if (i + BATCH < allQueries.length) {
+      await new Promise(r => setTimeout(r, DELAY))
+    }
+  }
 
   const poolMap = new Map<string, SpotifyTrack>()
   for (const result of searchResults) {

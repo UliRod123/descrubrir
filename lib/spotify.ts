@@ -30,7 +30,8 @@ async function refreshAccessToken(userId: string, tokens: SpotifyTokens): Promis
 export async function spotifyFetch<T>(
   userId: string,
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  _retries = 2
 ): Promise<T> {
   let tokens = await getTokens(userId)
   if (!tokens) throw new Error('No tokens for user')
@@ -47,6 +48,14 @@ export async function spotifyFetch<T>(
       ...(options.headers ?? {}),
     },
   })
+
+  // 429 — rate limited: respect Retry-After header then retry
+  if (res.status === 429 && _retries > 0) {
+    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '2', 10)
+    const waitMs = Math.min((retryAfter || 2) * 1000, 8000)
+    await new Promise(r => setTimeout(r, waitMs))
+    return spotifyFetch<T>(userId, path, options, _retries - 1)
+  }
 
   if (!res.ok) {
     const text = await res.text()
