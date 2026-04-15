@@ -10,6 +10,8 @@ interface Track {
   albumArt: string
 }
 
+type DiscoveryMode = 'mis-artistas' | 'ingles' | 'generos'
+
 const AVG_SONG_MINUTES = 3.5
 const MAX_HOURS = 8
 // How many songs to add per API call — each call takes ~2-3s in parallel
@@ -24,6 +26,14 @@ export default function DiscoverButton() {
   const [addedTracks, setAddedTracks] = useState<Track[]>([])
   const [message, setMessage] = useState('')
   const [hours, setHours] = useState(1)
+  const [modes, setModes] = useState<DiscoveryMode[]>(['mis-artistas'])
+
+  function toggleMode(mode: DiscoveryMode) {
+    if (mode === 'mis-artistas') return // locked, cannot deselect
+    setModes(prev =>
+      prev.includes(mode) ? prev.filter(m => m !== mode) : [...prev, mode]
+    )
+  }
 
   const count = songsForHours(hours)
   const displayTime = hours < 1
@@ -43,7 +53,7 @@ export default function DiscoverButton() {
       const thisBatch = Math.min(BATCH_SIZE, remaining)
 
       try {
-        const res = await fetch(`/api/discover?count=${thisBatch}`)
+        const res = await fetch(`/api/discover?count=${thisBatch}&modes=${modes.join(',')}`)
         const data = await res.json().catch(() => ({}))
 
         if (!res.ok || data.error) {
@@ -112,6 +122,42 @@ export default function DiscoverButton() {
               {h < 1 ? '30m' : `${h}h`}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Discovery mode toggles */}
+      <div className="w-full">
+        <p className="text-zinc-400 text-sm mb-3 text-center">¿Qué quieres descubrir?</p>
+        <div className="flex gap-2 justify-center flex-wrap">
+          {/* mis-artistas: always selected, locked */}
+          <button
+            disabled={loading}
+            onClick={() => toggleMode('mis-artistas')}
+            className="px-4 py-2 rounded-full text-sm font-semibold transition-colors bg-green-500 text-black cursor-default"
+            aria-pressed={true}
+          >
+            🎵 Tus artistas
+          </button>
+          <button
+            disabled={loading}
+            onClick={() => toggleMode('ingles')}
+            className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors ${
+              modes.includes('ingles') ? 'bg-green-500 text-black' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+            }`}
+            aria-pressed={modes.includes('ingles')}
+          >
+            🇺🇸 Inglés
+          </button>
+          <button
+            disabled={loading}
+            onClick={() => toggleMode('generos')}
+            className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors ${
+              modes.includes('generos') ? 'bg-green-500 text-black' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+            }`}
+            aria-pressed={modes.includes('generos')}
+          >
+            🎭 Géneros mix
+          </button>
         </div>
       </div>
 

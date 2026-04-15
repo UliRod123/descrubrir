@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { getRecommendations, getRecommendationsDiagnostics } from '@/lib/recommendations'
+import { getRecommendations, getRecommendationsDiagnostics, DiscoveryMode } from '@/lib/recommendations'
 import { addToQueue } from '@/lib/spotify'
 
 export async function GET(req: NextRequest) {
@@ -12,9 +12,15 @@ export async function GET(req: NextRequest) {
     100
   )
 
+  const VALID_MODES: DiscoveryMode[] = ['mis-artistas', 'ingles', 'generos']
+  const modesParam = req.nextUrl.searchParams.get('modes')
+  const modes: DiscoveryMode[] = modesParam
+    ? (modesParam.split(',').filter((m): m is DiscoveryMode => VALID_MODES.includes(m as DiscoveryMode)))
+    : ['mis-artistas']
+
   let tracks
   try {
-    tracks = await getRecommendations(session.userId, count, true)
+    tracks = await getRecommendations(session.userId, count, true, modes)
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

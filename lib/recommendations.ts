@@ -43,17 +43,27 @@ function toRecommended(track: SpotifyTrack, knownArtistIds: Set<string>): Recomm
   }
 }
 
+export type DiscoveryMode = 'mis-artistas' | 'ingles' | 'generos'
+
+const MODE_KEYWORDS: Record<Exclude<DiscoveryMode, 'mis-artistas'>, string[]> = {
+  ingles: ['pop 2024', 'r&b 2024', 'hip hop 2025', 'indie pop 2024', 'alternative 2024'],
+  generos: ['electronic 2024', 'jazz 2024', 'reggaeton 2025', 'latin pop 2024', 'funk 2024'],
+}
+
 export async function getRecommendations(
   userId: string,
   count: number,
-  skipCache = false
+  skipCache?: boolean,
+  modes?: DiscoveryMode[]
 ): Promise<RecommendedTrack[]> {
+  const activeModes: DiscoveryMode[] = modes && modes.length > 0 ? modes : ['mis-artistas']
+
   if (!skipCache) {
     const cached = await getCachedRecommendations(userId)
     if (cached && cached.length >= Math.min(count, 10)) return cached.slice(0, count)
   }
 
-  // Fetch all user data in parallel — only /me/ endpoints
+  // Fetch all user data in parallel
   const [tracksShort, tracksMedium, tracksLong, artists, recentIds] = await Promise.all([
     getTopTracks(userId, 'short_term', 50).catch(() => [] as SpotifyTrack[]),
     getTopTracks(userId, 'medium_term', 50).catch(() => [] as SpotifyTrack[]),
@@ -64,65 +74,55 @@ export async function getRecommendations(
 
   const knownArtistIds = new Set(artists.map(a => a.id))
 
-  // Pool A: user's own top tracks (deduplicated across time ranges, minus recently played)
-  const trackMap = new Map<string, SpotifyTrack>()
+  // Build exclusion set: songs the user ALREADY knows (top tracks + recently played)
+  // These should never be recommended — they're not "discoveries"
+  const knownTrackIds = new Set<string>()
   for (const t of [...tracksShort, ...tracksMedium, ...tracksLong]) {
-    if (t.id && t.uri) trackMap.set(t.id, t)
+    if (t.id) knownTrackIds.add(t.id)
   }
-  const poolARaw = Array.from(trackMap.values()).filter(t => !recentIds.has(t.id))
+  for (const id of recentIds) knownTrackIds.add(id)
 
-  // Pool B: search by top artist names — finds more tracks + collaborations with new artists
-  // Searching artist:"X" returns tracks where X appears, including features/collabs
-  // Use all 20 artists with 50 results each = up to 1000 raw tracks for variety
+  // Discovery pool: search results only — tracks the user hasn't heard
   const topArtists = artists.slice(0, 20)
-  const searchResults = await Promise.allSettled(
-    topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 50))
-  )
 
-  const poolBMap = new Map<string, SpotifyTrack>()
+  const artistQueries = topArtists.map(a => searchTracks(userId, `artist:"${a.name}"`, 50))
+  const keywordQueries: Promise<SpotifyTrack[]>[] = []
+  for (const mode of activeModes) {
+    if (mode === 'mis-artistas') continue
+    for (const kw of MODE_KEYWORDS[mode as Exclude<DiscoveryMode, 'mis-artistas'>]) {
+      keywordQueries.push(searchTracks(userId, kw, 50))
+    }
+  }
+
+  const searchResults = await Promise.allSettled([...artistQueries, ...keywordQueries])
+
+  const poolMap = new Map<string, SpotifyTrack>()
   for (const result of searchResults) {
     if (result.status === 'fulfilled') {
       for (const t of result.value) {
-        if (t.id && t.uri && !recentIds.has(t.id)) {
-          poolBMap.set(t.id, t)
+        // Skip if user already knows this track
+        if (t.id && t.uri && !knownTrackIds.has(t.id)) {
+          poolMap.set(t.id, t)
         }
       }
     }
   }
-  // Remove tracks already in Pool A (no duplicates)
-  for (const id of trackMap.keys()) poolBMap.delete(id)
-  const poolBRaw = Array.from(poolBMap.values())
+  let poolRaw = Array.from(poolMap.values())
 
-  // Filter already recommended from history
-  const [poolAFiltered, poolBFiltered] = await Promise.all([
-    filterOutRecommended(userId, poolARaw.map(t => t.id)),
-    filterOutRecommended(userId, poolBRaw.map(t => t.id)),
-  ])
+  // Filter already recommended (anti-repeat history)
+  const filtered = await filterOutRecommended(userId, poolRaw.map(t => t.id))
+  const filteredSet = new Set(filtered)
+  let pool = poolRaw.filter(t => filteredSet.has(t.id))
 
-  const poolASet = new Set(poolAFiltered)
-  const poolBSet = new Set(poolBFiltered)
-  let poolA = poolARaw.filter(t => poolASet.has(t.id))
-  let poolB = poolBRaw.filter(t => poolBSet.has(t.id))
-
-  // Auto-reset history if both pools exhausted
-  if (poolA.length === 0 && poolB.length === 0) {
+  // Auto-reset history if pool exhausted
+  if (pool.length === 0) {
     await clearRecommendedHistory(userId)
-    poolA = shuffle(poolARaw)
-    poolB = shuffle(poolBRaw)
+    pool = shuffle(poolRaw)
   }
 
-  if (poolA.length === 0 && poolB.length === 0) return []
+  if (pool.length === 0) return []
 
-  // Mix: ~50% Pool A (your favorites) + ~50% Pool B (discovery via search)
-  const half = Math.ceil(count / 2)
-  const fromA = shuffle(poolA).slice(0, half).map(t => toRecommended(t, knownArtistIds))
-  const fromB = shuffle(poolB).slice(0, count - fromA.length).map(t => toRecommended(t, knownArtistIds))
-  const gap = count - fromA.length - fromB.length
-  const extra = gap > 0
-    ? shuffle(poolA).slice(half, half + gap).map(t => toRecommended(t, knownArtistIds))
-    : []
-
-  const combined = shuffle([...fromA, ...fromB, ...extra])
+  const combined = shuffle(pool).slice(0, count).map(t => toRecommended(t, knownArtistIds))
 
   if (combined.length > 0) {
     await addRecommended(userId, combined.map(t => t.id))
@@ -133,10 +133,8 @@ export async function getRecommendations(
 }
 
 export async function getRecommendationsDiagnostics(userId: string): Promise<Record<string, unknown>> {
-  const [tracksShort, tracksMedium, tracksLong, artists, recentIds] = await Promise.all([
+  const [tracksShort, artists, recentIds] = await Promise.all([
     getTopTracks(userId, 'short_term', 50).catch(e => ({ error: String(e) })),
-    getTopTracks(userId, 'medium_term', 50).catch(e => ({ error: String(e) })),
-    getTopTracks(userId, 'long_term', 50).catch(e => ({ error: String(e) })),
     getTopArtistsFull(userId, 'medium_term', 20).catch(e => ({ error: String(e) })),
     getRecentlyPlayedTrackIds(userId).catch(() => new Set<string>()),
   ])
@@ -150,9 +148,7 @@ export async function getRecommendationsDiagnostics(userId: string): Promise<Rec
   }
 
   return {
-    tracksShortCount: Array.isArray(tracksShort) ? tracksShort.length : tracksShort,
-    tracksMediumCount: Array.isArray(tracksMedium) ? tracksMedium.length : tracksMedium,
-    tracksLongCount: Array.isArray(tracksLong) ? tracksLong.length : tracksLong,
+    topTracksCount: Array.isArray(tracksShort) ? tracksShort.length : tracksShort,
     recentIdsCount: recentIds instanceof Set ? recentIds.size : 0,
     artistCount: Array.isArray(artists) ? artists.length : artists,
     searchTest,
