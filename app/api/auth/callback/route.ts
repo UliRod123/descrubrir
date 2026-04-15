@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { saveTokens } from '@/lib/kv'
-import { buildSessionCookieHeader } from '@/lib/session'
+import { encodeSession } from '@/lib/session'
 import { getCurrentUserId } from '@/lib/spotify'
 
 export async function GET(req: NextRequest) {
@@ -47,6 +47,12 @@ export async function GET(req: NextRequest) {
   await redis.set(`user:${spotifyUserId}:scopes`, data.scope ?? 'none', { ex: 60 * 60 * 24 * 30 })
 
   const response = NextResponse.redirect(new URL('/dashboard', req.url))
-  response.headers.append('Set-Cookie', buildSessionCookieHeader({ userId: spotifyUserId }))
+  // Use Next.js cookies API — more reliable than manual Set-Cookie header on redirects
+  response.cookies.set('spotify_session', encodeSession({ userId: spotifyUserId }), {
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 30,
+    path: '/',
+  })
   return response
 }

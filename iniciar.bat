@@ -20,7 +20,7 @@ echo  NO cierres esta ventana mientras usas la app.
 echo.
 
 REM Abrir el navegador despues de 10 segundos
-start /min "" powershell -Command "Start-Sleep 10; Start-Process 'http://localhost:3000'"
+start /min "" powershell -Command "Start-Sleep 10; Start-Process 'http://127.0.0.1:3000'"
 
 REM Iniciar servidor
 call npm run dev
