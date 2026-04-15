@@ -29,5 +29,11 @@ export async function GET() {
     await spotifyFetch(session.userId, `/playlists/${pid}/followers`, { method: 'DELETE' }).catch(() => {})
   }
 
-  return NextResponse.json({ userId: session.userId, savedScopes, createTest, addTracksTest })
+  // Test queue
+  const queueTest = await spotifyFetch(session.userId,
+    `/me/player/queue?uri=${encodeURIComponent('spotify:track:4iV5W9uYEdYUVa79Axb7Rh')}`,
+    { method: 'POST' }
+  ).then(() => ({ ok: true })).catch(e => ({ ok: false, error: String(e) }))
+
+  return NextResponse.json({ userId: session.userId, savedScopes, createTest, addTracksTest, queueTest })
 }

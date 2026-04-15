@@ -48,7 +48,7 @@ export default function DiscoverButton() {
 
         if (!res.ok || data.error) {
           if (all.length > 0) break // partial success — stop gracefully
-          setMessage(`Abre Spotify y pon algo a reproducir primero, luego intenta de nuevo.`)
+          setMessage(data.error || 'Error desconocido')
           setLoading(false)
           return
         }
