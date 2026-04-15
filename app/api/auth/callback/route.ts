@@ -42,6 +42,10 @@ export async function GET(req: NextRequest) {
     expires_at: Date.now() + data.expires_in * 1000,
   })
 
+  // Save granted scopes for debugging
+  const { redis } = await import('@/lib/kv')
+  await redis.set(`user:${spotifyUserId}:scopes`, data.scope ?? 'none', { ex: 60 * 60 * 24 * 30 })
+
   const response = NextResponse.redirect(new URL('/dashboard', req.url))
   response.headers.append('Set-Cookie', buildSessionCookieHeader({ userId: spotifyUserId }))
   return response
