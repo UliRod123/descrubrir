@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface Track {
   id: string
@@ -21,12 +21,32 @@ function songsForHours(hours: number): number {
   return Math.max(1, Math.round((hours * 60) / AVG_SONG_MINUTES))
 }
 
+interface PlayerStatus {
+  isPlaying: boolean
+  currentDevice: string | null
+  currentTrack: string | null
+}
+
 export default function DiscoverButton() {
   const [loading, setLoading] = useState(false)
   const [addedTracks, setAddedTracks] = useState<Track[]>([])
   const [message, setMessage] = useState('')
   const [hours, setHours] = useState(1)
   const [modes, setModes] = useState<DiscoveryMode[]>(['mis-artistas'])
+  const [playerStatus, setPlayerStatus] = useState<PlayerStatus | null>(null)
+
+  // Poll Spotify player status every 10 seconds
+  useEffect(() => {
+    async function checkPlayer() {
+      const res = await fetch('/api/player-status').catch(() => null)
+      if (!res?.ok) return
+      const data = await res.json().catch(() => null)
+      if (data) setPlayerStatus(data)
+    }
+    checkPlayer()
+    const interval = setInterval(checkPlayer, 10_000)
+    return () => clearInterval(interval)
+  }, [])
 
   function toggleMode(mode: DiscoveryMode) {
     if (mode === 'mis-artistas') return // locked, cannot deselect
@@ -160,6 +180,26 @@ export default function DiscoverButton() {
             🎭 Géneros mix
           </button>
         </div>
+      </div>
+
+      {/* Spotify live status */}
+      <div className="w-full text-center">
+        {playerStatus === null ? (
+          <p className="text-zinc-600 text-xs">Verificando Spotify...</p>
+        ) : playerStatus.isPlaying ? (
+          <p className="text-green-400 text-xs">
+            🟢 Spotify activo en <span className="font-semibold">{playerStatus.currentDevice}</span>
+            {playerStatus.currentTrack && <span className="text-zinc-400"> · {playerStatus.currentTrack}</span>}
+          </p>
+        ) : playerStatus.currentDevice ? (
+          <p className="text-yellow-400 text-xs">
+            ⏸ {playerStatus.currentDevice} pausado — pon algo a reproducir
+          </p>
+        ) : (
+          <p className="text-red-400 text-xs">
+            🔴 No se detecta Spotify activo — abre la app y reproduce algo
+          </p>
+        )}
       </div>
 
       {/* Main button */}
