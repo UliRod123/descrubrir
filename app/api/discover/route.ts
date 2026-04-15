@@ -21,9 +21,14 @@ export async function GET(req: NextRequest) {
     ? modesParam.split(',').filter((m): m is DiscoveryMode => VALID_MODES.includes(m as DiscoveryMode))
     : ['mis-artistas']
 
+  // Fetch recommendations and device ID in parallel
   let tracks
+  let deviceId: string | null = null
   try {
-    tracks = await getRecommendations(session.userId, count, true, modes)
+    ;[tracks, deviceId] = await Promise.all([
+      getRecommendations(session.userId, count, true, modes),
+      getActiveDeviceId(session.userId).catch(() => null),
+    ])
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
@@ -34,11 +39,6 @@ export async function GET(req: NextRequest) {
   }
 
   const uris = tracks.map(t => t.uri).filter(u => u?.startsWith('spotify:track:'))
-
-  // Get device ID + add to queue in parallel — saves ~300ms per batch
-  const [deviceId] = await Promise.all([
-    getActiveDeviceId(session.userId).catch(() => null),
-  ])
 
   const BATCH = 10
   let queuedCount = 0

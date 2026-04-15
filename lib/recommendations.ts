@@ -72,31 +72,25 @@ export async function getRecommendations(
 
   // Discovery pool: search results filtered only by recently played
   // (Redis anti-repeat history handles not repeating recommendations)
-  const topArtists = artists.slice(0, 8)
+  // 4 artists max — enough pool, fits in Vercel 10s limit
+  const topArtists = artists.slice(0, 4)
 
-  // Build all query functions (lazy — not started yet)
-  const allQueries: (() => Promise<SpotifyTrack[]>)[] = [
-    ...topArtists.map(a => () => searchTracks(userId, `artist:"${a.name}"`, 40)),
-  ]
+  const artistSearches = topArtists.map(a =>
+    searchTracks(userId, `artist:"${a.name}"`, 50)
+  )
+
+  // Keyword modes: max 2 keywords each to stay within time budget
+  const keywordSearches: Promise<SpotifyTrack[]>[] = []
   for (const mode of activeModes) {
     if (mode === 'mis-artistas') continue
-    for (const kw of MODE_KEYWORDS[mode as Exclude<DiscoveryMode, 'mis-artistas'>]) {
-      allQueries.push(() => searchTracks(userId, kw, 50))
+    const keywords = MODE_KEYWORDS[mode as Exclude<DiscoveryMode, 'mis-artistas'>].slice(0, 2)
+    for (const kw of keywords) {
+      keywordSearches.push(searchTracks(userId, kw, 50))
     }
   }
 
-  // Run in batches of 3 with 600ms pause to avoid Spotify 429
-  const BATCH = 3
-  const DELAY = 600
-  const searchResults: PromiseSettledResult<SpotifyTrack[]>[] = []
-  for (let i = 0; i < allQueries.length; i += BATCH) {
-    const batch = allQueries.slice(i, i + BATCH)
-    const batchResults = await Promise.allSettled(batch.map(fn => fn()))
-    searchResults.push(...batchResults)
-    if (i + BATCH < allQueries.length) {
-      await new Promise(r => setTimeout(r, DELAY))
-    }
-  }
+  // All searches in parallel — no delays
+  const searchResults = await Promise.allSettled([...artistSearches, ...keywordSearches])
 
   const poolMap = new Map<string, SpotifyTrack>()
   for (const result of searchResults) {
