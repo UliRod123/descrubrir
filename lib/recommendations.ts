@@ -72,18 +72,20 @@ export async function getRecommendations(
 
   // Discovery pool: search results filtered only by recently played
   // (Redis anti-repeat history handles not repeating recommendations)
-  // 4 artists max — enough pool, fits in Vercel 10s limit
-  const topArtists = artists.slice(0, 4)
+  // Local: 8 artists (no timeout), Vercel: 4 max
+  const maxArtists = process.env.VERCEL ? 4 : 8
+  const topArtists = artists.slice(0, maxArtists)
 
   const artistSearches = topArtists.map(a =>
     searchTracks(userId, `artist:"${a.name}"`, 50)
   )
 
-  // Keyword modes: max 2 keywords each to stay within time budget
+  // Keyword modes: 5 keywords local, 2 on Vercel
+  const maxKeywords = process.env.VERCEL ? 2 : 5
   const keywordSearches: Promise<SpotifyTrack[]>[] = []
   for (const mode of activeModes) {
     if (mode === 'mis-artistas') continue
-    const keywords = MODE_KEYWORDS[mode as Exclude<DiscoveryMode, 'mis-artistas'>].slice(0, 2)
+    const keywords = MODE_KEYWORDS[mode as Exclude<DiscoveryMode, 'mis-artistas'>].slice(0, maxKeywords)
     for (const kw of keywords) {
       keywordSearches.push(searchTracks(userId, kw, 50))
     }
